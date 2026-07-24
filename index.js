@@ -16,7 +16,8 @@ client.on('messageCreate', message => {
     message.channel.send('Pong!');
   } else if (message.content === '.hello') {
     message.channel.send(`Hello, ${message.author.username}!`);
-  }
+  } else if (message.content === '.owner') {
+    message.channel.send('[@ro_mihaiu](https://discord.ro-mihaiu.xyz/) owns the bot configurations.');
 });
 
 client.login(process.env.DISCORD_TOKEN);
