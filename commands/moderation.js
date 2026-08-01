@@ -45,7 +45,8 @@ async function resolveMember(guild, input) {
 
   // Username (exact, case-insensitive) or global display name / nickname
   const normalized = trimmed.toLowerCase();
-  const members = await guild.members.fetch();
+  const members = await guild.members.fetch().catch(() => null);
+  if (!members) return null;
   return members.find(
     (m) => m.user.username.toLowerCase() === normalized
       || m.user.globalName?.toLowerCase() === normalized
@@ -247,7 +248,7 @@ async function handleModerationPrefix(message, args) {
 
     // warn add
     if (!mentioned) return message.reply('Usage: `.warn @member <reason>`');
-    const reason = rest.slice(1).join(' ');
+    const reason = rest.join(' ');
     if (!reason) return message.reply('Usage: `.warn @member <reason>`');
     const warning = {
       id: data.nextWarningId++,
@@ -271,16 +272,17 @@ async function handleModerationPrefix(message, args) {
   // ─── ban / kick / mute / unmute (prefix) ────────────────────────────────
   if (['ban', 'kick', 'mute', 'unmute'].includes(command)) {
     if (!isStaff(message.member)) return message.reply('This command is for staff only.');
-    const memberInput = rest[0];
+    const memberInput = args[1];
     if (!memberInput) {
-      return message.reply(`Usage: \`.${command} <member> [reason]\``);
+      const usage = command === 'mute' ? '`.mute <member> <duration> [reason]`' : `\`.${command} <member> [reason]\``;
+      return message.reply(`Usage: ${usage}`);
     }
     const member = await resolveMember(message.guild, memberInput);
     if (!member) {
       return message.reply(`Could not find a member matching **${memberInput}**. Try mentioning them, using their username, or their user ID.`);
     }
     const targetUser = member.user;
-    const reason = rest.slice(1).join(' ') || 'No reason provided';
+    const reason = args.slice(2).join(' ') || 'No reason provided';
 
     if (command === 'ban') {
       await member.ban({ reason: `Banned by ${message.author.tag}: ${reason}` });
@@ -307,11 +309,11 @@ async function handleModerationPrefix(message, args) {
     }
 
     if (command === 'mute') {
-      const ms = parseDuration(rest[1]);
+      const ms = parseDuration(args[2]);
       if (!ms) {
         return message.reply('Usage: `.mute <member> <duration> [reason]` — e.g. `.mute @member 2h spam`');
       }
-      const muteReason = rest.slice(2).join(' ') || 'No reason provided';
+      const muteReason = args.slice(3).join(' ') || 'No reason provided';
       await member.timeout(ms, `Muted by ${message.author.tag}: ${muteReason}`);
       const until = Date.now() + ms;
       await safeDm(targetUser, makeEmbed().setTitle('You were muted').setDescription(`**Server:** ${message.guild.name}\n**Duration:** ${formatDuration(ms)}\n**Reason:** ${muteReason}`));
