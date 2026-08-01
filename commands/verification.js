@@ -20,6 +20,9 @@ const commandDefinitions = [
   new SlashCommandBuilder().setName('untrust').setDescription('Remove a member trust at a location (staff)')
     .addUserOption((option) => option.setName('member').setDescription('Member').setRequired(true))
     .addStringOption((option) => option.setName('location').setDescription('Location').setRequired(true).addChoices(...TRUST_CHOICES)),
+  new SlashCommandBuilder().setName('verify').setDescription('Verify yourself with your in-game user and rank')
+    .addStringOption((option) => option.setName('in_game_user').setDescription('Your in-game username').setRequired(true))
+    .addStringOption((option) => option.setName('rank').setDescription('Your rank').setRequired(true).addChoices(...RANKS.map((rank) => ({ name: rank, value: rank })))),
 ];
 
 async function handleVerification(interaction) {
@@ -131,5 +134,47 @@ async function handleVerificationPrefix(message, args) {
   }
 }
 
-module.exports = { commandDefinitions, handleVerification, handleVerificationPrefix };
+async function handleVerify(interaction) {
+  const inGameUser = interaction.options.getString('in_game_user', true).trim();
+  const rank = interaction.options.getString('rank', true);
+  const canonicalRank = RANKS.find((candidate) => candidate.toLowerCase() === rank.toLowerCase());
+  if (!canonicalRank) {
+    return interaction.reply({ content: `Invalid rank. Choose one of: ${RANKS.join(', ')}.`, ephemeral: true });
+  }
+  const record = userRecord(interaction.user.id);
+  record.inGameUser = inGameUser;
+  record.rank = canonicalRank;
+  saveData();
+  const nickname = `🌸 ${inGameUser}`;
+  try {
+    await interaction.member.setNickname(nickname, 'MIHU bot verification');
+    return interaction.reply({ content: `You are verified as **${nickname}** with rank **${canonicalRank}**.`, ephemeral: true });
+  } catch (error) {
+    console.error('Nickname change failed:', error);
+    return interaction.reply({ content: `Your records were saved, but I could not change your nickname (${nickname}). Make sure the bot has the **Manage Nicknames** permission and that your highest role is below the bot's role.`, ephemeral: true });
+  }
+}
+
+async function handleVerifyPrefix(message, args) {
+  const [, ...rest] = args;
+  const inGameUser = rest[0];
+  const rank = rest.slice(1).join(' ').trim();
+  if (!inGameUser || !rank) return message.reply('Usage: `.verify <in-game-user> <rank>`\nExample: `.verify Mihaitzuuu Celestial`');
+  const canonicalRank = RANKS.find((candidate) => candidate.toLowerCase() === rank.toLowerCase());
+  if (!canonicalRank) return message.reply(`Invalid rank. Choose one of: ${RANKS.join(', ')}.`);
+  const record = userRecord(message.author.id);
+  record.inGameUser = inGameUser;
+  record.rank = canonicalRank;
+  saveData();
+  const nickname = `🌸 ${inGameUser}`;
+  try {
+    await message.member.setNickname(nickname, 'MIHU bot verification');
+    return message.reply(`You are verified as **${nickname}** with rank **${canonicalRank}**.`);
+  } catch (error) {
+    console.error('Nickname change failed:', error);
+    return message.reply(`Your records were saved, but I could not change your nickname (${nickname}). Make sure the bot has the **Manage Nicknames** permission and that your highest role is below the bot's role.`);
+  }
+}
+
+module.exports = { commandDefinitions, handleVerification, handleVerificationPrefix, handleVerify, handleVerifyPrefix };
 

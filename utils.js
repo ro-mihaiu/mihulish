@@ -37,7 +37,7 @@ function saveData() {
 }
 
 function userRecord(userId) {
-  return (data.users[userId] ||= { points: 0, rank: null, trustedLocations: [] });
+  return (data.users[userId] ||= { points: 0, rank: null, inGameUser: null, trustedLocations: [] });
 }
 
 function isStaff(member) {

@@ -23,6 +23,7 @@ const slashCommands = commandModules.flatMap((mod) => mod.commandDefinitions.map
 // ─── Prefix help text ───────────────────────────────────────────────────────
 const PREFIX_HELP =
   'Available prefix commands:\n' +
+  '• `.verify <in-game-user> <rank>` — verify yourself (sets nickname `🌸 in-game-user`)\n' +
   '• `.rank update <rank>` — request a rank change\n' +
   '• `.rank change @member <rank>` — [staff] change rank\n' +
   '• `.unverify @member` — [staff] remove from bot records\n' +
@@ -79,6 +80,7 @@ client.on('interactionCreate', async (interaction) => {
 
     // Route to the correct module handler
     const handlerMap = {
+      verify: 'handleVerify',
       rank: 'handleVerification',
       unverify: 'handleVerification',
       trust: 'handleVerification',
@@ -145,6 +147,7 @@ client.on('messageCreate', async (message) => {
   try {
     // Route to prefix handlers
     const prefixHandlerMap = {
+      verify: 'handleVerifyPrefix',
       rank: 'handleVerificationPrefix',
       unverify: 'handleVerificationPrefix',
       trust: 'handleVerificationPrefix',
