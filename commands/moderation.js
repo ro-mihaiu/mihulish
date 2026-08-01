@@ -93,7 +93,6 @@ async function showWarnings(target, replyOrMessage) {
 
 async function handleModeration(interaction) {
   const subcommand = interaction.options.getSubcommand(false);
-  const target = interaction.options.getUser('member');
 
   if (interaction.commandName === 'warnings') {
     return showWarnings(interaction.user, interaction);
@@ -101,11 +100,13 @@ async function handleModeration(interaction) {
 
   if (interaction.commandName === 'warns') {
     if (!await requireStaff(interaction)) return;
+    const target = interaction.options.getUser('member');
     return showWarnings(target, interaction);
   }
 
   if (interaction.commandName === 'warn') {
     if (!await requireStaff(interaction)) return;
+    const target = interaction.options.getUser('member');
 
     if (subcommand === 'add') {
       const reason = interaction.options.getString('reason', true);
