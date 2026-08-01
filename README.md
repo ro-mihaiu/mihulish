@@ -14,6 +14,8 @@ DISCORD_TOKEN=your_bot_token
 DISCORD_GUILD_ID=your_server_id
 # Comma-separated staff role IDs. Members with Manage Server also count as staff.
 STAFF_ROLE_IDS=role_id_one,role_id_two
+# Channel ID where every command used with the bot is logged as an embed.
+LOG_CHANNEL_ID=your_log_channel_id
 ```
 
 Run locally with `npm start`. The bot registers commands at start-up.
@@ -138,6 +140,24 @@ Both Discord slash commands (`/`) and prefix (`.`) commands work.
 .cmd list
 .update
 .help
+```
+
+## Command Logging
+
+Every command used with the bot — both `/` slash commands and `.` prefix commands, including `.help` and custom tags — is logged to the channel configured via `LOG_CHANNEL_ID`. Each log entry is an embed showing:
+
+- **Command** — e.g. `/rank change`, with the input options/arguments
+- **User** — `@member - username`
+- **Channel** — where the command was used
+- **Time** — full timestamp when the command was requested
+
+The log embed uses the `#e91e63` accent color, shows the bot logo as the embed thumbnail and footer icon, and has the footer text **Made by @ro_mihaiu**.
+
+Place the bot logo at the project root as `logo.png`:
+
+```
+mihulish/
+└── logo.png
 ```
 
 ## Permissions

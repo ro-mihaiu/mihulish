@@ -1,6 +1,13 @@
 require('dotenv').config();
+const path = require('node:path');
 const { Client, GatewayIntentBits, EmbedBuilder } = require('discord.js');
 const { data, isStaff } = require('./utils');
+
+// ─── Command log configuration ──────────────────────────────────────────────
+const LOG_CHANNEL_ID = process.env.LOG_CHANNEL_ID;
+const LOG_EMBED_COLOR = 0xe91e63;
+const LOG_LOGO_PATH = path.join(__dirname, 'logo.png');
+const LOG_EMBED_URL = 'attachment://logo.png';
 
 const client = new Client({
   intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMembers, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent],
@@ -119,6 +126,55 @@ function buildHelpEmbed() {
   return embed;
 }
 
+// ─── Command logging ────────────────────────────────────────────────────────
+function buildSlashInput(interaction) {
+  const parts = [];
+  const group = interaction.options.getSubcommandGroup(false);
+  const sub = interaction.options.getSubcommand(false);
+  if (group) parts.push(group);
+  if (sub) parts.push(sub);
+  for (const option of interaction.options.data) {
+    if (option.type === 1 || option.type === 2) continue; // subcommand / group
+    if (option.value === undefined) continue;
+    let value = option.value;
+    if (option.type === 6) value = `<@${option.value}>`;       // user
+    else if (option.type === 7) value = `<#${option.value}>`;  // channel
+    else if (option.type === 8) value = `<@&${option.value}>`; // role
+    parts.push(`${option.name}: ${value}`);
+  }
+  return parts.join(', ');
+}
+
+async function logCommand({ command, input = '', user, channelName = 'Unknown', client }) {
+  if (!LOG_CHANNEL_ID) return;
+  try {
+    const logChannel = await client.channels.fetch(LOG_CHANNEL_ID).catch(() => null);
+    if (!logChannel?.isTextBased()) return;
+
+    const description = [
+      `**Command:** \`${command}\`${input ? ` [${input}]` : ''}`,
+      `**User:** ${user} - ${user.username}`,
+      `**Channel:** ${channelName}`,
+      `**Time:** <t:${Math.floor(Date.now() / 1000)}:F>`,
+    ].join('\n');
+
+    const embed = new EmbedBuilder()
+      .setColor(LOG_EMBED_COLOR)
+      .setTitle('📜 Command Log')
+      .setDescription(description)
+      .setThumbnail(LOG_EMBED_URL)
+      .setFooter({ text: 'Made by @ro_mihaiu', iconURL: LOG_EMBED_URL })
+      .setTimestamp();
+
+    await logChannel.send({
+      embeds: [embed],
+      files: [{ attachment: LOG_LOGO_PATH, name: 'logo.png' }],
+    });
+  } catch (error) {
+    console.error('Failed to log command:', error);
+  }
+}
+
 // ─── Ready event: register commands ─────────────────────────────────────────
 client.once('ready', async () => {
   console.log(`Logged in as ${client.user.tag}`);
@@ -137,6 +193,15 @@ client.on('interactionCreate', async (interaction) => {
 
   try {
     const { commandName } = interaction;
+
+    // Log every slash command used
+    await logCommand({
+      command: `/${commandName}`,
+      input: buildSlashInput(interaction),
+      user: interaction.user,
+      channelName: interaction.channel?.name,
+      client: interaction.client,
+    });
 
     // Route to the correct module handler
     const handlerMap = {
@@ -194,6 +259,15 @@ client.on('messageCreate', async (message) => {
   const command = args[0]?.toLowerCase();
 
   if (!command) return;
+
+  // Log every prefix command used (including .help and custom tags)
+  await logCommand({
+    command: `.${command}`,
+    input: args.slice(1).join(' '),
+    user: message.author,
+    channelName: message.channel?.name,
+    client: message.client,
+  });
 
   // Help command
   if (command === 'help') return message.reply({ embeds: [buildHelpEmbed()] });
