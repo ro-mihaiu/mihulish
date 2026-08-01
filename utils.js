@@ -12,10 +12,10 @@ function readData() {
     return JSON.parse(fs.readFileSync(DATA_PATH, 'utf8'));
   } catch (error) {
     if (error.code === 'ENOENT') {
-      return { users: {}, warnings: [], nextWarningId: 1, wallOfFame: [], items: {}, subscriptions: {}, sessions: {}, coins: {}, giveaways: [], customCommands: {} };
+      return { users: {}, warnings: [], nextWarningId: 1, wallOfFame: [], items: {}, subscriptions: {}, sessions: {}, coins: {}, giveaways: [], customCommands: {}, claims: {} };
     }
     console.error('Could not read bot data:', error);
-    return { users: {}, warnings: [], nextWarningId: 1, wallOfFame: [], items: {}, subscriptions: {}, sessions: {}, coins: {}, giveaways: [], customCommands: {} };
+    return { users: {}, warnings: [], nextWarningId: 1, wallOfFame: [], items: {}, subscriptions: {}, sessions: {}, coins: {}, giveaways: [], customCommands: {}, claims: {} };
   }
 }
 
@@ -30,6 +30,7 @@ data.sessions ||= {};
 data.coins ||= {};
 data.giveaways ||= [];
 data.customCommands ||= {};
+data.claims ||= {};
 
 function saveData() {
   fs.mkdirSync(path.dirname(DATA_PATH), { recursive: true });

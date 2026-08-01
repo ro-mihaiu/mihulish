@@ -7,7 +7,7 @@ const commandDefinitions = [
       .addChannelOption((option) => option.setName('channel').setDescription('Channel').setRequired(true))
       .addIntegerOption((option) => option.setName('days').setDescription('Duration in days').setRequired(true))
       .addIntegerOption((option) => option.setName('winners').setDescription('Number of winners').setRequired(true).setMinValue(1))
-      .addIntegerOption((option) => option.setName('prize').setDescription('Prize coin amount').setRequired(true)))
+      .addStringOption((option) => option.setName('prize').setDescription('Prize (e.g. 100 coins, MVP rank, etc.)').setRequired(true)))
     .addSubcommand((sub) => sub.setName('reroll').setDescription('Reroll a giveaway')
       .addStringOption((option) => option.setName('msg_id').setDescription('Giveaway message ID').setRequired(true))
       .addIntegerOption((option) => option.setName('winners').setDescription('Number of winners to reroll').setRequired(false).setMinValue(1)))
@@ -24,13 +24,13 @@ async function handleGiveaway(interaction) {
     const channel = interaction.options.getChannel('channel', true);
     const days = interaction.options.getInteger('days', true);
     const winners = interaction.options.getInteger('winners', true);
-    const prize = interaction.options.getInteger('prize', true);
+    const prize = interaction.options.getString('prize', true);
     const endTime = Date.now() + (days * 24 * 60 * 60 * 1000);
 
     const embed = new EmbedBuilder()
       .setColor(0x9b59b6)
       .setTitle('🎉 Giveaway!')
-      .setDescription(`React with 🎉 to enter!\n**Prize:** ${prize} coins\n**Winners:** ${winners}\n**Ends:** <t:${Math.floor(endTime / 1000)}:R>`)
+      .setDescription(`React with 🎉 to enter!\n**Prize:** ${prize}\n**Winners:** ${winners}\n**Ends:** <t:${Math.floor(endTime / 1000)}:R>`)
       .setFooter({ text: `Hosted by ${interaction.user.tag}` })
       .setTimestamp(endTime);
 
@@ -75,7 +75,7 @@ async function handleGiveaway(interaction) {
       const shuffled = [...entrants].sort(() => Math.random() - 0.5);
       const selected = shuffled.slice(0, maxWinners);
 
-      await channel.send(`🎉 **Reroll!** New winner(s): ${selected.join(', ')} won **${gw.prize}** coin(s)!`);
+      await channel.send(`🎉 **Reroll!** New winner(s): ${selected.join(', ')} won **${gw.prize}**!`);
       return interaction.reply({ content: `Rerolled **${maxWinners}** winner(s).`, ephemeral: true });
     } catch (error) {
       console.error('Reroll error:', error);
@@ -104,7 +104,7 @@ async function handleGiveaway(interaction) {
       } else {
         const shuffled = [...entrants].sort(() => Math.random() - 0.5);
         const selected = shuffled.slice(0, gw.winners);
-        await channel.send(`🎉 **Giveaway ended!** Winner(s): ${selected.join(', ')} won **${gw.prize}** coin(s)!`);
+        await channel.send(`🎉 **Giveaway ended!** Winner(s): ${selected.join(', ')} won **${gw.prize}**!`);
       }
 
       const endedEmbed = EmbedBuilder.from(msg.embeds[0]).setColor(0x808080).setFooter({ text: 'Ended' });
@@ -127,10 +127,11 @@ async function handleGWPrefix(message, args) {
 
   if (command === 'gw') {
     if (subcommand === 'start') {
-      const [channelMention, days, winners, prize] = rest;
-      if (!channelMention || !days || !winners || !prize) {
+      const [channelMention, days, winners, ...prizeParts] = rest;
+      if (!channelMention || !days || !winners || !prizeParts.length) {
         return message.reply('Usage: `.gw start <#channel> <days> <winners> <prize>`');
       }
+      const prize = prizeParts.join(' ');
       const channel = message.mentions.channels.first();
       if (!channel) return message.reply('Please mention a valid channel.');
       const endTime = Date.now() + (Number(days) * 24 * 60 * 60 * 1000);
@@ -138,7 +139,7 @@ async function handleGWPrefix(message, args) {
       const embed = new EmbedBuilder()
         .setColor(0x9b59b6)
         .setTitle('🎉 Giveaway!')
-        .setDescription(`React with 🎉 to enter!\n**Prize:** ${prize} coins\n**Winners:** ${winners}\n**Ends:** <t:${Math.floor(endTime / 1000)}:R>`)
+        .setDescription(`React with 🎉 to enter!\n**Prize:** ${prize}\n**Winners:** ${winners}\n**Ends:** <t:${Math.floor(endTime / 1000)}:R>`)
         .setFooter({ text: `Hosted by ${message.author.tag}` })
         .setTimestamp(endTime);
 
@@ -151,7 +152,7 @@ async function handleGWPrefix(message, args) {
         channelId: channel.id,
         guildId: message.guild.id,
         hostId: message.author.id,
-        prize: Number(prize),
+        prize,
         winners: Number(winners),
         endTime,
         ended: false
@@ -178,7 +179,7 @@ async function handleGWPrefix(message, args) {
         if (!entrants.length) return message.reply('No entrants.');
         const maxW = Math.min(rerollWinners, entrants.length, gw.winners);
         const selected = [...entrants].sort(() => Math.random() - 0.5).slice(0, maxW);
-        await channel.send(`🎉 **Reroll!** New winner(s): ${selected.join(', ')} won **${gw.prize}** coin(s)!`);
+        await channel.send(`🎉 **Reroll!** New winner(s): ${selected.join(', ')} won **${gw.prize}**!`);
         return message.reply(`Rerolled ${maxW} winner(s).`);
       } catch (error) {
         return message.reply('Could not reroll. Check the message ID.');
@@ -202,7 +203,7 @@ async function handleGWPrefix(message, args) {
         const entrants = users.filter((u) => !u.bot).map((u) => u);
         if (entrants.length) {
           const selected = [...entrants].sort(() => Math.random() - 0.5).slice(0, gw.winners);
-          await channel.send(`🎉 **Giveaway ended!** Winner(s): ${selected.join(', ')} won **${gw.prize}** coin(s)!`);
+          await channel.send(`🎉 **Giveaway ended!** Winner(s): ${selected.join(', ')} won **${gw.prize}**!`);
         } else {
           await channel.send('Giveaway ended — no one entered.');
         }

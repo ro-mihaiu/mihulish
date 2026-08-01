@@ -20,44 +20,104 @@ const commandModules = [
 
 const slashCommands = commandModules.flatMap((mod) => mod.commandDefinitions.map((cmd) => cmd.toJSON()));
 
-// ─── Prefix help text ───────────────────────────────────────────────────────
-const PREFIX_HELP =
-  'Available prefix commands:\n' +
-  '• `.verify <in-game-user> <rank>` — verify yourself (sets nickname `🌸 in-game-user`)\n' +
-  '• `.rank update <rank>` — request a rank change\n' +
-  '• `.rank change @member <rank>` — [staff] change rank\n' +
-  '• `.unverify @member` — [staff] remove from bot records\n' +
-  '• `.trust @member <location>` / `.untrust @member <location>` — [staff] manage trust (presets: mihu-farm, mihu-rentals, mihu-shop, mihu-casino, mihu-money, dungeon)\n' +
-  '• `.warn @member <reason>` — [staff] issue a warning\n' +
-  '• `.warn remove <id> <reason>` — [staff] remove a warning\n' +
-  '• `.warnings` — view your warnings\n' +
-  '• `.warns @member` — [staff] view member warnings\n' +
-  '• `.points add|remove @member <amount>` — [staff] manage points\n' +
-  '• `.points view` — view your points\n' +
-  '• `.points check` — [staff] check all balances\n' +
-  '• `.wof` / `.wof add|remove @member` — Wall of Fame\n' +
-  '• `.item add <name> <bulk/individual> <price> <min_amount>` — [staff] add item\n' +
-  '• `.item remove <name>` — [staff] remove item\n' +
-  '• `.item restocked <name> <amount>` — [staff] restock item\n' +
-  '• `.subscription add @member [amount]` — [staff] add subscription tokens\n' +
-  '• `.subscription remove @member [amount]` — [staff] remove tokens\n' +
-  '• `.mysubscription` — check your tokens\n' +
-  '• `.session add|remove <item>` — [staff] manage session gear\n' +
-  '• `.session check` — check session\n' +
-  '• `.session start <hours>` — [staff] start session\n' +
-  '• `.session stop` — [staff] stop session\n' +
-  '• `.session history` — view session history\n' +
-  '• `.coins add|remove @member <amount>` — [staff] manage coins\n' +
-  '• `.coins bal` — check your coins\n' +
-  '• `.cf <bet>` — coin flip\n' +
-  '• `.gw start <#channel> <days> <winners> <prize>` — [staff] start giveaway\n' +
-  '• `.gw reroll <msg_id> [winners]` — [staff] reroll giveaway\n' +
-  '• `.gw end <msg_id>` — [staff] end giveaway\n' +
-  '• `.update` — [staff] update dashboards\n' +
-  '• `.cmd add <name> <content>` — [staff] add a custom command (tag)\n' +
-  '• `.cmd remove <name>` — [staff] remove a custom command\n' +
-  '• `.cmd list` — list custom commands\n' +
-  '• `.help` — show this message';
+// ─── Help embed ─────────────────────────────────────────────────────────────
+function buildHelpEmbed() {
+  const embed = new EmbedBuilder()
+    .setColor(0x5865f2)
+    .setTitle('📖 Mihu Bot Commands')
+    .setDescription('Use `[staff]` commands only if you have a staff role or the **Manage Server** permission. Prefix commands work with `.`, slash commands with `/`.');
+
+  const categories = [
+    {
+      name: '📋 Verification',
+      value:
+        '`.rank update <rank>` — request a rank change\n' +
+        '`.rank change @member <rank>` — [staff] change rank\n' +
+        '`.unverify @member` — [staff] remove from bot records\n' +
+        '`.trust @member <location>` — [staff] trust member\n' +
+        '`.untrust @member <location>` — [staff] remove trust\n' +
+        '*(presets: mihu-farm, mihu-rentals, mihu-shop, mihu-casino, mihu-money, dungeon)*'
+    },
+    {
+      name: '🛡️ Moderation',
+      value:
+        '`.warn @member <reason>` — [staff] issue a warning\n' +
+        '`.warn remove <id> <reason>` — [staff] remove a warning\n' +
+        '`.warnings` — view your warnings\n' +
+        '`.warns @member` — [staff] view member warnings'
+    },
+    {
+      name: '⭐ Rewards',
+      value:
+        '`.points add|remove @member <amount>` — [staff] manage points\n' +
+        '`.points view` — view your points\n' +
+        '`.points check` — [staff] check all balances\n' +
+        '`.wof` — view Wall of Fame\n' +
+        '`.wof add|remove @member` — [staff] manage Wall of Fame'
+    },
+    {
+      name: '🛒 Shop',
+      value:
+        '`.item add <name> <bulk/individual> <price> <min_amount>` — [staff] add item\n' +
+        '`.item remove <name>` — [staff] remove item\n' +
+        '`.item restocked <name> <amount>` — [staff] restock item'
+    },
+    {
+      name: '📅 Subscriptions / Rentals',
+      value:
+        '`.subscription add @member [amount]` — [staff] add rental tokens\n' +
+        '`.subscription remove @member [amount]` — [staff] remove tokens\n' +
+        '`.mysubscription` — check your tokens\n' +
+        '`.session add|remove <item>` — [staff] manage session gear\n' +
+        '`.session check` — check session\n' +
+        '`.session start <hours>` — [staff] start session\n' +
+        '`.session stop` — [staff] stop session\n' +
+        '`.session history` — view session history'
+    },
+    {
+      name: '🎉 Fun',
+      value:
+        '`.coins add|remove @member <amount>` — [staff] manage coins\n' +
+        '`.coins bal` — check your coins\n' +
+        '`.cf <heads|tails> <bet>` — 50/50 coin flip (pick a side, or leave it random)\n' +
+        '`.daily` — claim 50 coins every 24h\n' +
+        '`.weekly` — claim 250 coins every 7 days\n' +
+        '`.monthly` — claim 1000 coins every 30 days'
+    },
+    {
+      name: '🎁 Giveaways',
+      value:
+        '`.gw start <#channel> <days> <winners> <prize>` — [staff] start giveaway\n' +
+        '`.gw reroll <msg_id> [winners]` — [staff] reroll giveaway\n' +
+        '`.gw end <msg_id>` — [staff] end giveaway'
+    },
+    {
+      name: '🔧 Utility',
+      value:
+        '`.update` — [staff] update dashboards'
+    },
+    {
+      name: '🏷️ Custom Commands',
+      value:
+        '`.cmd add <name> <content>` — [staff] add a custom command (tag)\n' +
+        '`.cmd remove <name>` — [staff] remove a custom command\n' +
+        '`.cmd list` — list custom commands\n' +
+        'Trigger any saved tag with `.<name>`.'
+    },
+  ];
+
+  for (const category of categories) {
+    embed.addFields({ name: category.name, value: category.value, inline: false });
+  }
+
+  embed.addFields({
+    name: '🔗 Links',
+    value: 'Full documentation: https://bot.ro-mihaiu.xyz/commands',
+    inline: false
+  });
+
+  return embed;
+}
 
 // ─── Ready event: register commands ─────────────────────────────────────────
 client.once('ready', async () => {
@@ -96,6 +156,9 @@ client.on('interactionCreate', async (interaction) => {
       session: 'handleSession',
       coins: 'handleFun',
       cf: 'handleFun',
+      daily: 'handleFun',
+      weekly: 'handleFun',
+      monthly: 'handleFun',
       gw: 'handleGiveaway',
       update: 'handleUpdate',
       cmd: 'handleCmd',
@@ -133,16 +196,7 @@ client.on('messageCreate', async (message) => {
   if (!command) return;
 
   // Help command
-  if (command === 'help') return message.reply(PREFIX_HELP);
-
-  // Staff-requiring prefix commands
-  const staffRequired = ['rank', 'unverify', 'trust', 'untrust', 'warn', 'warns', 'points', 'wof', 'item', 'subscription', 'session', 'coins', 'gw', 'update'];
-  if (staffRequired.includes(command) && !isStaff(message.member)) {
-    // warn is an exception — warn add is staff, warn remove is staff, but warn by itself could be... no, all warn subcommands are staff
-    // points view/check are special — view is self, check is staff. Let sub-handlers deal with it.
-    // Actually, let's check: rank update is NOT staff, rank change IS staff. So we can't blanket block.
-    // We'll let each handler deal with permissions internally and just route.
-  }
+  if (command === 'help') return message.reply({ embeds: [buildHelpEmbed()] });
 
   try {
     // Route to prefix handlers
@@ -163,6 +217,9 @@ client.on('messageCreate', async (message) => {
       session: 'handleSubscriptionPrefix',
       coins: 'handleFunPrefix',
       cf: 'handleFunPrefix',
+      daily: 'handleFunPrefix',
+      weekly: 'handleFunPrefix',
+      monthly: 'handleFunPrefix',
       gw: 'handleGWPrefix',
       update: 'handleGWPrefix',
       cmd: 'handleCmdPrefix',
