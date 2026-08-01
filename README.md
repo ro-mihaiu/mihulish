@@ -1,6 +1,10 @@
 # mihulish
 
-Discord bot for MIHU player-warps. Stores all bot records in `data/bot-data.json`, which is created automatically and should be kept on a persistent disk/volume when hosted on Oracle.
+Discord bot for MIHU player-warps. All bot records are stored in a **SQLite** database at `data/bot-data.db` (WAL mode, atomic writes) using `better-sqlite3`. On first launch the bot **automatically migrates** an existing `data/bot-data.json` into SQLite — the JSON file is kept as a backup. The database must live on a persistent disk/volume when hosted (GitHub Actions runners and ephemeral bot hosts lose files between runs).
+
+## Requirements
+
+- **Node.js ≥ 22** (required by `better-sqlite3` v13). `better-sqlite3` uses prebuilt binaries for common platforms, so no compiler toolchain is needed.
 
 ## Setup
 
@@ -20,14 +24,20 @@ LOG_CHANNEL_ID=your_log_channel_id
 
 Run locally with `npm start`. The bot registers commands at start-up.
 
+> **Migrating from JSON:** if a `data/bot-data.json` exists from an older version, the bot imports it into SQLite on the first run. After confirming the migration, you may delete the JSON backup if you want.
+
 ## File Structure
 
 ```
 mihulish/
 ├── index.js                    # Client setup, event routing, command loader
+├── database.js                 # SQLite storage layer (better-sqlite3)
 ├── utils.js                    # Shared helpers (data, permissions, DM, ranks)
 ├── data/
-│   └── bot-data.json           # Persistent data store (auto-created)
+│   ├── bot-data.db             # Persistent SQLite database (auto-created)
+│   └── bot-data.json           # Legacy JSON backup (migrated on first run)
+├── scripts/
+│   └── db-check.js             # SQLite storage smoke test (`npm run db-check`)
 └── commands/
     ├── verification.js         # /rank, /unverify, /trust, /untrust
     ├── moderation.js           # /warn, /warnings, /warns
@@ -38,6 +48,12 @@ mihulish/
     ├── utility.js              # /gw, /update
     └── cmd.js                  # /cmd add, /remove, /list (custom tags)
 ```
+
+## Storage
+
+- All bot records (users, points, ranks, warnings, wall of fame, items, subscriptions, sessions, coins, giveaways, custom commands, claim cooldowns) are stored in `data/bot-data.db`.
+- Writes are performed in a **single SQLite transaction** (atomic and crash-safe), which avoids the corrupted-JSON problem when a host kills the process mid-write.
+- The DB file is ignored by git (`data/`, `*.db`, `*.db-wal`, `*.db-shm`). Keep `data/` on a persistent volume on GitHub/bot-hosting so records survive restarts.
 
 ## Commands
 

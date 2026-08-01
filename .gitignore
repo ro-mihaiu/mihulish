@@ -1,3 +1,7 @@
 .env
 data/
+*.db
+*.db-wal
+*.db-shm
 mihulish.code-workspace
+TODO.md

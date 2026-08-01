@@ -1,8 +1,7 @@
-const fs = require('node:fs');
 const path = require('node:path');
 const { PermissionFlagsBits, EmbedBuilder } = require('discord.js');
+const { loadData, saveData: saveDataToDb } = require('./database');
 
-const DATA_PATH = path.join(__dirname, 'data', 'bot-data.json');
 const MAX_POINTS = 100;
 const RANKS = ['Celestial', 'Immortal', 'Emperor', 'Shogun', 'Samurai', 'Sensei', 'Elder', 'Ronin', 'Shinobi', 'Guardian', 'Warrior', 'Ranger', 'Nomad', 'Wanderer'];
 const staffRoleIds = new Set((process.env.STAFF_ROLE_IDS || '').split(',').map((id) => id.trim()).filter(Boolean));
@@ -40,16 +39,9 @@ async function logEvent(client, { title, description, user = null }) {
   }
 }
 
+// Load bot records from the SQLite database (see database.js).
 function readData() {
-  try {
-    return JSON.parse(fs.readFileSync(DATA_PATH, 'utf8'));
-  } catch (error) {
-    if (error.code === 'ENOENT') {
-      return { users: {}, warnings: [], nextWarningId: 1, wallOfFame: [], items: {}, subscriptions: {}, sessions: {}, coins: {}, giveaways: [], customCommands: {}, claims: {} };
-    }
-    console.error('Could not read bot data:', error);
-    return { users: {}, warnings: [], nextWarningId: 1, wallOfFame: [], items: {}, subscriptions: {}, sessions: {}, coins: {}, giveaways: [], customCommands: {}, claims: {} };
-  }
+  return loadData();
 }
 
 const data = readData();
@@ -65,9 +57,9 @@ data.giveaways ||= [];
 data.customCommands ||= {};
 data.claims ||= {};
 
+// Persist the in-memory data to SQLite (atomic, inside a single transaction).
 function saveData() {
-  fs.mkdirSync(path.dirname(DATA_PATH), { recursive: true });
-  fs.writeFileSync(DATA_PATH, `${JSON.stringify(data, null, 2)}\n`);
+  saveDataToDb(data);
 }
 
 function userRecord(userId) {
