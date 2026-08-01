@@ -1,5 +1,5 @@
-const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
-const { data, saveData, requireStaff, safeDm } = require('../utils');
+const { SlashCommandBuilder } = require('discord.js');
+const { data, saveData, requireStaff, safeDm, makeEmbed, logoFile } = require('../utils');
 
 const commandDefinitions = [
   new SlashCommandBuilder().setName('subscription').setDescription('Manage subscriptions')
@@ -43,7 +43,7 @@ async function handleSubscription(interaction) {
         timestamp: now
       });
       saveData();
-      await safeDm(target, new EmbedBuilder().setColor(0x57f287).setTitle('Subscription updated').setDescription(`You received **${amount}** rental token(s). Total: ${data.subscriptions[target.id].tokens}.`));
+      await safeDm(target, makeEmbed().setTitle('Subscription updated').setDescription(`You received **${amount}** rental token(s). Total: ${data.subscriptions[target.id].tokens}.`));
       return interaction.reply({ content: `Added **${amount}** token(s) to ${target}. They have ${data.subscriptions[target.id].tokens} token(s) total.`, ephemeral: true });
     }
 
@@ -59,7 +59,7 @@ async function handleSubscription(interaction) {
         timestamp: Date.now()
       });
       saveData();
-      await safeDm(target, new EmbedBuilder().setColor(0xed4245).setTitle('Subscription updated').setDescription(`${amount} rental token(s) were removed. Remaining: ${data.subscriptions[target.id].tokens}.`));
+      await safeDm(target, makeEmbed().setTitle('Subscription updated').setDescription(`${amount} rental token(s) were removed. Remaining: ${data.subscriptions[target.id].tokens}.`));
       return interaction.reply({ content: `Removed **${amount}** token(s) from ${target}. They have ${data.subscriptions[target.id].tokens} token(s) left.`, ephemeral: true });
     }
   }
@@ -163,7 +163,7 @@ async function handleSession(interaction) {
     const entries = session.history.slice(-10).reverse().map((h, i) =>
       `**#${session.history.length - i}** — ${h.hours}h planned, ${h.elapsed}h used — <t:${Math.floor(h.startTime / 1000)}:d>`
     ).join('\n');
-    return interaction.reply({ embeds: [new EmbedBuilder().setColor(0x5865f2).setTitle('Session History').setDescription(entries.slice(0, 4096))], ephemeral: true });
+    return interaction.reply({ embeds: [makeEmbed().setTitle('Session History').setDescription(entries.slice(0, 4096))], files: logoFile(), ephemeral: true });
   }
 }
 
@@ -182,7 +182,7 @@ async function handleSubscriptionPrefix(message, args) {
       data.subscriptions[mentioned.id].tokens += amount;
       data.subscriptions[mentioned.id].history.push({ type: 'add', amount, staffId: message.author.id, timestamp: Date.now() });
       saveData();
-      await safeDm(mentioned, new EmbedBuilder().setColor(0x57f287).setTitle('Subscription updated').setDescription(`You received **${amount}** rental token(s). Total: ${data.subscriptions[mentioned.id].tokens}.`));
+      await safeDm(mentioned, makeEmbed().setTitle('Subscription updated').setDescription(`You received **${amount}** rental token(s). Total: ${data.subscriptions[mentioned.id].tokens}.`));
       return message.reply(`Added **${amount}** token(s) to ${mentioned}. Total: ${data.subscriptions[mentioned.id].tokens}.`);
     }
 
@@ -193,7 +193,7 @@ async function handleSubscriptionPrefix(message, args) {
       data.subscriptions[mentioned.id].tokens -= amount;
       data.subscriptions[mentioned.id].history.push({ type: 'remove', amount, staffId: message.author.id, timestamp: Date.now() });
       saveData();
-      await safeDm(mentioned, new EmbedBuilder().setColor(0xed4245).setTitle('Subscription updated').setDescription(`${amount} rental token(s) were removed. Remaining: ${data.subscriptions[mentioned.id].tokens}.`));
+      await safeDm(mentioned, makeEmbed().setTitle('Subscription updated').setDescription(`${amount} rental token(s) were removed. Remaining: ${data.subscriptions[mentioned.id].tokens}.`));
       return message.reply(`Removed **${amount}** token(s) from ${mentioned}. Remaining: ${data.subscriptions[mentioned.id].tokens}.`);
     }
   }
@@ -272,7 +272,7 @@ async function handleSubscriptionPrefix(message, args) {
       const entries = history.slice(-10).reverse().map((h, i) =>
         `**#${history.length - i}** — ${h.hours}h planned, ${h.elapsed}h used`
       ).join('\n');
-      return message.reply({ embeds: [new EmbedBuilder().setColor(0x5865f2).setTitle('Session History').setDescription(entries.slice(0, 4096))] });
+      return message.reply({ embeds: [makeEmbed().setTitle('Session History').setDescription(entries.slice(0, 4096))], files: logoFile() });
     }
   }
 }

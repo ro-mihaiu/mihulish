@@ -7,6 +7,39 @@ const MAX_POINTS = 100;
 const RANKS = ['Celestial', 'Immortal', 'Emperor', 'Shogun', 'Samurai', 'Sensei', 'Elder', 'Ronin', 'Shinobi', 'Guardian', 'Warrior', 'Ranger', 'Nomad', 'Wanderer'];
 const staffRoleIds = new Set((process.env.STAFF_ROLE_IDS || '').split(',').map((id) => id.trim()).filter(Boolean));
 
+// ─── Shared embed styling (used by every embed in the bot) ─────────────────
+const EMBED_COLOR = 0xe91e63;
+const EMBED_URL = 'attachment://logo.png';
+const LOGO_PATH = path.join(__dirname, 'logo.png');
+const LOG_CHANNEL_ID = process.env.LOG_CHANNEL_ID;
+
+function makeEmbed() {
+  return new EmbedBuilder()
+    .setColor(EMBED_COLOR)
+    .setFooter({ text: 'Made by @ro_mihaiu', iconURL: EMBED_URL });
+}
+
+function logoFile() {
+  return [{ attachment: LOGO_PATH, name: 'logo.png' }];
+}
+
+// Send a styled event embed (member join/leave/ban/mute/etc.) to the log channel.
+async function logEvent(client, { title, description, user = null }) {
+  if (!LOG_CHANNEL_ID) return;
+  try {
+    const channel = await client.channels.fetch(LOG_CHANNEL_ID).catch(() => null);
+    if (!channel?.isTextBased()) return;
+    const embed = makeEmbed()
+      .setTitle(title)
+      .setDescription(description)
+      .setThumbnail(user?.displayAvatarURL?.() ?? null)
+      .setTimestamp();
+    await channel.send({ embeds: [embed], files: logoFile() });
+  } catch (error) {
+    console.error('Failed to log event:', error);
+  }
+}
+
 function readData() {
   try {
     return JSON.parse(fs.readFileSync(DATA_PATH, 'utf8'));
@@ -53,7 +86,7 @@ async function requireStaff(interaction) {
 }
 
 async function safeDm(user, embed) {
-  try { await user.send({ embeds: [embed] }); } catch (error) { console.error('Failed to send DM:', error); }
+  try { await user.send({ embeds: [embed], files: logoFile() }); } catch (error) { console.error('Failed to send DM:', error); }
 }
 
 async function setRankRole(member, rank) {
@@ -65,5 +98,5 @@ async function setRankRole(member, rank) {
   return true;
 }
 
-module.exports = { data, saveData, userRecord, isStaff, requireStaff, safeDm, setRankRole, MAX_POINTS, RANKS, readData };
+module.exports = { data, saveData, userRecord, isStaff, requireStaff, safeDm, setRankRole, MAX_POINTS, RANKS, readData, makeEmbed, logoFile, logEvent, EMBED_COLOR, EMBED_URL };
 

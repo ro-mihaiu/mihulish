@@ -1,5 +1,5 @@
-const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
-const { data, saveData, requireStaff } = require('../utils');
+const { SlashCommandBuilder } = require('discord.js');
+const { data, saveData, requireStaff, makeEmbed, logoFile } = require('../utils');
 
 const commandDefinitions = [
   new SlashCommandBuilder().setName('gw').setDescription('Manage giveaways')
@@ -27,14 +27,13 @@ async function handleGiveaway(interaction) {
     const prize = interaction.options.getString('prize', true);
     const endTime = Date.now() + (days * 24 * 60 * 60 * 1000);
 
-    const embed = new EmbedBuilder()
-      .setColor(0x9b59b6)
+    const embed = makeEmbed()
       .setTitle('🎉 Giveaway!')
       .setDescription(`React with 🎉 to enter!\n**Prize:** ${prize}\n**Winners:** ${winners}\n**Ends:** <t:${Math.floor(endTime / 1000)}:R>`)
-      .setFooter({ text: `Hosted by ${interaction.user.tag}` })
+      .setFooter({ text: `Hosted by ${interaction.user.tag} • Made by @ro_mihaiu`, iconURL: 'attachment://logo.png' })
       .setTimestamp(endTime);
 
-    const msg = await channel.send({ embeds: [embed] });
+    const msg = await channel.send({ embeds: [embed], files: logoFile() });
     await msg.react('🎉');
 
     const giveaway = {
@@ -107,14 +106,20 @@ async function handleGiveaway(interaction) {
         await channel.send(`🎉 **Giveaway ended!** Winner(s): ${selected.join(', ')} won **${gw.prize}**!`);
       }
 
-      const endedEmbed = EmbedBuilder.from(msg.embeds[0]).setColor(0x808080).setFooter({ text: 'Ended' });
-      await msg.edit({ embeds: [endedEmbed] });
+      const endedEmbed = EmbedBuilderFrom(msg.embeds[0]).setFooter({ text: `Ended • Made by @ro_mihaiu`, iconURL: 'attachment://logo.png' });
+      await msg.edit({ embeds: [endedEmbed], files: logoFile() });
     } catch (error) {
       console.error('End giveaway error:', error);
     }
 
     return interaction.reply({ content: 'Giveaway ended.', ephemeral: true });
   }
+}
+
+// Re-export the Discord EmbedBuilder so the "end" path can clone existing giveaway embeds.
+function EmbedBuilderFrom(embed) {
+  const { EmbedBuilder } = require('discord.js');
+  return EmbedBuilder.from(embed);
 }
 
 async function handleUpdate(interaction) {
@@ -136,14 +141,13 @@ async function handleGWPrefix(message, args) {
       if (!channel) return message.reply('Please mention a valid channel.');
       const endTime = Date.now() + (Number(days) * 24 * 60 * 60 * 1000);
 
-      const embed = new EmbedBuilder()
-        .setColor(0x9b59b6)
+      const embed = makeEmbed()
         .setTitle('🎉 Giveaway!')
         .setDescription(`React with 🎉 to enter!\n**Prize:** ${prize}\n**Winners:** ${winners}\n**Ends:** <t:${Math.floor(endTime / 1000)}:R>`)
-        .setFooter({ text: `Hosted by ${message.author.tag}` })
+        .setFooter({ text: `Hosted by ${message.author.tag} • Made by @ro_mihaiu`, iconURL: 'attachment://logo.png' })
         .setTimestamp(endTime);
 
-      const msg = await channel.send({ embeds: [embed] });
+      const msg = await channel.send({ embeds: [embed], files: logoFile() });
       await msg.react('🎉');
 
       data.giveaways ||= [];
@@ -207,8 +211,8 @@ async function handleGWPrefix(message, args) {
         } else {
           await channel.send('Giveaway ended — no one entered.');
         }
-        const endedEmbed = EmbedBuilder.from(msg.embeds[0]).setColor(0x808080).setFooter({ text: 'Ended' });
-        await msg.edit({ embeds: [endedEmbed] });
+        const endedEmbed = EmbedBuilderFrom(msg.embeds[0]).setFooter({ text: `Ended • Made by @ro_mihaiu`, iconURL: 'attachment://logo.png' });
+        await msg.edit({ embeds: [endedEmbed], files: logoFile() });
       } catch (error) { console.error(error); }
       return message.reply('Giveaway ended.');
     }

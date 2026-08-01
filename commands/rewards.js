@@ -1,5 +1,5 @@
-const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
-const { data, saveData, userRecord, requireStaff, safeDm, MAX_POINTS } = require('../utils');
+const { SlashCommandBuilder } = require('discord.js');
+const { data, saveData, userRecord, requireStaff, safeDm, MAX_POINTS, makeEmbed, logoFile } = require('../utils');
 
 const commandDefinitions = [
   new SlashCommandBuilder().setName('points').setDescription('Manage or view reward points')
@@ -27,7 +27,7 @@ async function handleRewards(interaction) {
     if (subcommand === 'view') {
       const points = userRecord(interaction.user.id).points;
       if (points >= MAX_POINTS) {
-        await safeDm(interaction.user, new EmbedBuilder().setColor(0xfee75c).setTitle('Points capacity reached').setDescription(`You are at the full capacity of ${MAX_POINTS} points.`));
+        await safeDm(interaction.user, makeEmbed().setTitle('Points capacity reached').setDescription(`You are at the full capacity of ${MAX_POINTS} points.`));
       }
       return interaction.reply({ content: `You have **${points}/${MAX_POINTS}** points.${points >= MAX_POINTS ? ' I also sent you a DM.' : ''}`, ephemeral: true });
     }
@@ -36,7 +36,7 @@ async function handleRewards(interaction) {
 
     if (subcommand === 'check') {
       const balances = Object.entries(data.users).map(([id, record]) => `<@${id}> — **${record.points}/${MAX_POINTS}**`).join('\n') || 'No saved point balances.';
-      return interaction.reply({ embeds: [new EmbedBuilder().setColor(0x5865f2).setTitle('Point balance check').setDescription(balances.slice(0, 4096))], ephemeral: true });
+      return interaction.reply({ embeds: [makeEmbed().setTitle('Point balance check').setDescription(balances.slice(0, 4096))], files: logoFile(), ephemeral: true });
     }
 
     const amount = interaction.options.getInteger('amount', true);
@@ -50,7 +50,7 @@ async function handleRewards(interaction) {
   if (interaction.commandName === 'wof') {
     if (subcommand === 'view') {
       const entries = data.wallOfFame.map((id, index) => `${index + 1}. <@${id}>`).join('\n') || 'No one is on the Wall of Fame yet.';
-      return interaction.reply({ embeds: [new EmbedBuilder().setColor(0xff73fa).setTitle('Wall of Fame').setDescription(entries)] });
+      return interaction.reply({ embeds: [makeEmbed().setTitle('Wall of Fame').setDescription(entries)], files: logoFile() });
     }
 
     if (!await requireStaff(interaction)) return;
@@ -78,14 +78,14 @@ async function handleRewardsPrefix(message, args) {
     if (subcommand === 'view' || subcommand === 'ping') {
       const points = userRecord(message.author.id).points;
       if (points >= MAX_POINTS) {
-        await safeDm(message.author, new EmbedBuilder().setColor(0xfee75c).setTitle('Points capacity reached').setDescription(`You are at ${MAX_POINTS} points.`));
+        await safeDm(message.author, makeEmbed().setTitle('Points capacity reached').setDescription(`You are at ${MAX_POINTS} points.`));
       }
       return message.reply(`You have **${points}/${MAX_POINTS}** points.`);
     }
 
     if (subcommand === 'check') {
       const balances = Object.entries(data.users).map(([id, record]) => `<@${id}> — **${record.points}/${MAX_POINTS}**`).join('\n') || 'No saved point balances.';
-      return message.reply({ embeds: [new EmbedBuilder().setColor(0x5865f2).setTitle('Point balance check').setDescription(balances.slice(0, 4096))] });
+      return message.reply({ embeds: [makeEmbed().setTitle('Point balance check').setDescription(balances.slice(0, 4096))], files: logoFile() });
     }
 
     if (!['add', 'remove'].includes(subcommand) || !mentioned || !Number.isInteger(amount) || amount < 1) {
@@ -101,7 +101,7 @@ async function handleRewardsPrefix(message, args) {
   if (command === 'wof') {
     if (!subcommand || subcommand === 'view') {
       const entries = data.wallOfFame.map((id, index) => `${index + 1}. <@${id}>`).join('\n') || 'No one is on the Wall of Fame yet.';
-      return message.reply({ embeds: [new EmbedBuilder().setColor(0xff73fa).setTitle('Wall of Fame').setDescription(entries)] });
+      return message.reply({ embeds: [makeEmbed().setTitle('Wall of Fame').setDescription(entries)], files: logoFile() });
     }
     if (!mentioned || !['add', 'remove'].includes(subcommand)) return message.reply('Usage: `.wof add|remove @member`');
     if (subcommand === 'add' && !data.wallOfFame.includes(mentioned.id)) data.wallOfFame.push(mentioned.id);

@@ -1,5 +1,5 @@
-const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
-const { data, saveData, requireStaff, isStaff } = require('../utils');
+const { SlashCommandBuilder } = require('discord.js');
+const { data, saveData, requireStaff, isStaff, makeEmbed, logoFile } = require('../utils');
 
 const commandDefinitions = [
   new SlashCommandBuilder().setName('cmd').setDescription('Manage custom commands (tags)')
@@ -23,7 +23,7 @@ async function handleCmd(interaction) {
       return interaction.reply({ content: 'No custom commands have been created yet.', ephemeral: true });
     }
     const description = names.map((cmdName) => `• \`.${cmdName}\` — ${(data.customCommands[cmdName].content || '').slice(0, 60)}`).join('\n');
-    return interaction.reply({ embeds: [new EmbedBuilder().setColor(0x5865f2).setTitle('Custom commands').setDescription(description.slice(0, 4096))] });
+    return interaction.reply({ embeds: [makeEmbed().setTitle('Custom commands').setDescription(description.slice(0, 4096))], files: logoFile() });
   }
 
   if (!await requireStaff(interaction)) return;
@@ -63,7 +63,7 @@ async function handleCmdPrefix(message, args) {
     const names = Object.keys(data.customCommands || {});
     if (!names.length) return message.reply('No custom commands have been created yet.');
     const description = names.map((cmdName) => `• \`.${cmdName}\` — ${(data.customCommands[cmdName].content || '').slice(0, 60)}`).join('\n');
-    return message.reply({ embeds: [new EmbedBuilder().setColor(0x5865f2).setTitle('Custom commands').setDescription(description.slice(0, 4096))] });
+    return message.reply({ embeds: [makeEmbed().setTitle('Custom commands').setDescription(description.slice(0, 4096))], files: logoFile() });
   }
 
   if (subcommand === 'add') {

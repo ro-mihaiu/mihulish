@@ -55,6 +55,10 @@ Both Discord slash commands (`/`) and prefix (`.`) commands work.
 - `/warn remove <id> <reason>` — [staff] remove a warning (DMs the member)
 - `/warnings` — view your own warnings
 - `/warns @member` — [staff] view a member's warnings
+- `/ban <member> [reason] [delete_days]` — [staff] ban a member (mention, username, or user ID)
+- `/kick <member> [reason]` — [staff] kick a member (mention, username, or user ID)
+- `/mute <member> <duration> [reason]` — [staff] timeout a member (mention, username, or user ID). Durations like `10m`, `2h`, `3d`, `1w`
+- `/unmute <member>` — [staff] remove a timeout (mention, username, or user ID)
 
 ### Rewards
 - `/points add @member <amount>` — [staff] add reward points (max 100)
@@ -112,6 +116,13 @@ Both Discord slash commands (`/`) and prefix (`.`) commands work.
 .warn remove 4 resolved
 .warnings
 .warns @member
+.ban @member breaking rules
+.ban 123456789012345678
+.ban someusername breaking rules
+.kick @member spamming
+.mute @member 2h talking too much
+.mute 123456789012345678 3d
+.unmute @member
 .points add @member 10
 .points view
 .points check
@@ -151,7 +162,32 @@ Every command used with the bot — both `/` slash commands and `.` prefix comma
 - **Channel** — where the command was used
 - **Time** — full timestamp when the command was requested
 
-The log embed uses the `#e91e63` accent color, shows the bot logo as the embed thumbnail and footer icon, and has the footer text **Made by @ro_mihaiu**.
+The command log embed uses the user's profile picture as the thumbnail.
+
+## Member Event Logging
+
+The bot also logs the following events to the same `LOG_CHANNEL_ID` channel, using the affected member's profile picture as the thumbnail:
+
+- 📥 **Member joined** the server
+- 📤 **Member left** the server
+- 🔨 **Member banned** (with reason)
+- 🔓 **Member unbanned**
+- ⚠️ **Member warned** (with warning # and reason)
+- 🔇 **Member muted / timeout** (with duration and reason)
+- 🔊 **Member unmuted**
+- 👢 **Member kicked** (with reason)
+
+## Bot Status
+
+The bot sets a presence/status on startup: **Watching Mihu's community** (online).
+
+## Embed Styling
+
+All embeds across the bot share the same style:
+
+- **Color:** `#e91e63`
+- **Footer:** `Made by @ro_mihaiu` with the bot logo icon
+- **Thumbnail:** the bot logo (or the affected user's profile picture for log entries)
 
 Place the bot logo at the project root as `logo.png`:
 
@@ -159,6 +195,8 @@ Place the bot logo at the project root as `logo.png`:
 mihulish/
 └── logo.png
 ```
+
+> Note: The bot needs the **Server Members Intent**, **Moderation Intent**, **View Channel + Send Messages** in the log channel, and **Ban Members / Kick Members / Moderate Members** permissions for the moderation commands.
 
 ## Permissions
 

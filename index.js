@@ -1,17 +1,23 @@
 require('dotenv').config();
 const path = require('node:path');
-const { Client, GatewayIntentBits, EmbedBuilder } = require('discord.js');
-const { data, isStaff } = require('./utils');
+const { Client, GatewayIntentBits, ActivityType } = require('discord.js');
+const { data, makeEmbed, logoFile, logEvent, EMBED_COLOR } = require('./utils');
+
+const client = new Client({
+  intents: [
+    GatewayIntentBits.Guilds,
+    GatewayIntentBits.GuildMembers,
+    GatewayIntentBits.GuildModeration,
+    GatewayIntentBits.GuildMessages,
+    GatewayIntentBits.MessageContent,
+  ],
+});
 
 // ─── Command log configuration ──────────────────────────────────────────────
 const LOG_CHANNEL_ID = process.env.LOG_CHANNEL_ID;
-const LOG_EMBED_COLOR = 0xe91e63;
+const LOG_EMBED_COLOR = EMBED_COLOR;
 const LOG_LOGO_PATH = path.join(__dirname, 'logo.png');
 const LOG_EMBED_URL = 'attachment://logo.png';
-
-const client = new Client({
-  intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMembers, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent],
-});
 
 // ─── Load command modules ───────────────────────────────────────────────────
 const commandModules = [
@@ -29,9 +35,9 @@ const slashCommands = commandModules.flatMap((mod) => mod.commandDefinitions.map
 
 // ─── Help embed ─────────────────────────────────────────────────────────────
 function buildHelpEmbed() {
-  const embed = new EmbedBuilder()
-    .setColor(0x5865f2)
+  const embed = makeEmbed()
     .setTitle('📖 Mihu Bot Commands')
+    .setThumbnail(LOG_EMBED_URL)
     .setDescription('Use `[staff]` commands only if you have a staff role or the **Manage Server** permission. Prefix commands work with `.`, slash commands with `/`.');
 
   const categories = [
@@ -51,7 +57,11 @@ function buildHelpEmbed() {
         '`.warn @member <reason>` — [staff] issue a warning\n' +
         '`.warn remove <id> <reason>` — [staff] remove a warning\n' +
         '`.warnings` — view your warnings\n' +
-        '`.warns @member` — [staff] view member warnings'
+        '`.warns @member` — [staff] view member warnings\n' +
+        '`.ban <member> <reason>` — [staff] ban (mention, username, or user ID)\n' +
+        '`.kick <member> <reason>` — [staff] kick (mention, username, or user ID)\n' +
+        '`.mute <member> <duration> <reason>` — [staff] timeout member\n' +
+        '`.unmute <member>` — [staff] remove timeout'
     },
     {
       name: '⭐ Rewards',
@@ -158,32 +168,84 @@ async function logCommand({ command, input = '', user, channelName = 'Unknown', 
       `**Time:** <t:${Math.floor(Date.now() / 1000)}:F>`,
     ].join('\n');
 
-    const embed = new EmbedBuilder()
-      .setColor(LOG_EMBED_COLOR)
+    const embed = makeEmbed()
       .setTitle('📜 Command Log')
       .setDescription(description)
       .setThumbnail(LOG_EMBED_URL)
-      .setFooter({ text: 'Made by @ro_mihaiu', iconURL: LOG_EMBED_URL })
       .setTimestamp();
 
     await logChannel.send({
       embeds: [embed],
-      files: [{ attachment: LOG_LOGO_PATH, name: 'logo.png' }],
+      files: logoFile(),
     });
   } catch (error) {
     console.error('Failed to log command:', error);
   }
 }
 
-// ─── Ready event: register commands ─────────────────────────────────────────
+// ─── Ready event: register commands + status ───────────────────────────────
 client.once('ready', async () => {
   console.log(`Logged in as ${client.user.tag}`);
+  client.user.setPresence({
+    activities: [{ name: 'Mihu\'s community', type: ActivityType.Watching }],
+    status: 'online',
+  });
   try {
     const guild = process.env.DISCORD_GUILD_ID ? await client.guilds.fetch(process.env.DISCORD_GUILD_ID) : null;
     await (guild ? guild.commands : client.application.commands).set(slashCommands);
     console.log(`Registered ${slashCommands.length} application commands ${guild ? `in ${guild.name}` : 'globally'}.`);
   } catch (error) {
     console.error('Could not register commands:', error);
+  }
+});
+
+// ─── Member / moderation event logging ─────────────────────────────────────
+client.on('guildMemberAdd', (member) => {
+  logEvent(member.client, {
+    title: '📥 Member Joined',
+    description: `${member} - ${member.user.username} joined the server.\n**Account created:** <t:${Math.floor(member.user.createdTimestamp / 1000)}:R>`,
+    user: member.user,
+  });
+});
+
+client.on('guildMemberRemove', (member) => {
+  logEvent(member.client, {
+    title: '📤 Member Left',
+    description: `${member} - ${member.user.username} left the server.`,
+    user: member.user,
+  });
+});
+
+client.on('guildBanAdd', (ban) => {
+  logEvent(ban.client, {
+    title: '🔨 Member Banned',
+    description: `${ban.user} - ${ban.user.username} was banned.\n**Reason:** ${ban.reason || 'No reason provided'}`,
+    user: ban.user,
+  });
+});
+
+client.on('guildBanRemove', (ban) => {
+  logEvent(ban.client, {
+    title: '🔓 Member Unbanned',
+    description: `${ban.user} - ${ban.user.username} was unbanned.`,
+    user: ban.user,
+  });
+});
+
+client.on('guildMemberUpdate', (oldMember, newMember) => {
+  if (!oldMember.communicationDisabledUntilTimestamp && newMember.communicationDisabledUntilTimestamp) {
+    const until = newMember.communicationDisabledUntilTimestamp;
+    logEvent(newMember.client, {
+      title: '🔇 Member Muted (Timeout)',
+      description: `${newMember} - ${newMember.user.username} was muted.\n**Until:** <t:${Math.floor(until / 1000)}:F> (<t:${Math.floor(until / 1000)}:R>)`,
+      user: newMember.user,
+    });
+  } else if (oldMember.communicationDisabledUntilTimestamp && !newMember.communicationDisabledUntilTimestamp) {
+    logEvent(newMember.client, {
+      title: '🔊 Member Unmuted',
+      description: `${newMember} - ${newMember.user.username} was unmuted.`,
+      user: newMember.user,
+    });
   }
 });
 
@@ -213,6 +275,10 @@ client.on('interactionCreate', async (interaction) => {
       warn: 'handleModeration',
       warnings: 'handleModeration',
       warns: 'handleModeration',
+      ban: 'handleModeration',
+      kick: 'handleModeration',
+      mute: 'handleModeration',
+      unmute: 'handleModeration',
       points: 'handleRewards',
       wof: 'handleRewards',
       item: 'handleShop',
@@ -283,6 +349,10 @@ client.on('messageCreate', async (message) => {
       warn: 'handleModerationPrefix',
       warnings: 'handleModerationPrefix',
       warns: 'handleModerationPrefix',
+      ban: 'handleModerationPrefix',
+      kick: 'handleModerationPrefix',
+      mute: 'handleModerationPrefix',
+      unmute: 'handleModerationPrefix',
       points: 'handleRewardsPrefix',
       wof: 'handleRewardsPrefix',
       item: 'handleShopPrefix',

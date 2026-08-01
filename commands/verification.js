@@ -1,5 +1,5 @@
-const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
-const { data, saveData, userRecord, requireStaff, safeDm, setRankRole, RANKS } = require('../utils');
+const { SlashCommandBuilder } = require('discord.js');
+const { data, saveData, userRecord, requireStaff, safeDm, setRankRole, RANKS, makeEmbed, logoFile } = require('../utils');
 
 const STAFF_CHANNEL_ID = '1511566996632768663';
 const TRUST_LOCATIONS = ['mihu-farm', 'mihu-rentals', 'mihu-shop', 'mihu-casino', 'mihu-money', 'dungeon'];
@@ -33,7 +33,7 @@ async function handleVerification(interaction) {
     const rank = interaction.options.getString('rank', true);
     const channel = await interaction.client.channels.fetch(STAFF_CHANNEL_ID).catch(() => null);
     if (!channel?.isTextBased()) return interaction.reply({ content: 'The rank-request channel is not available. Please contact staff.', ephemeral: true });
-    await channel.send({ embeds: [new EmbedBuilder().setColor(0x5865f2).setTitle('Rank change request').addFields({ name: 'Member', value: `${interaction.user} (${interaction.user.id})` }, { name: 'Requested rank', value: rank }).setTimestamp()] });
+    await channel.send({ embeds: [makeEmbed().setTitle('Rank change request').addFields({ name: 'Member', value: `${interaction.user} (${interaction.user.id})` }, { name: 'Requested rank', value: rank }).setTimestamp()], files: logoFile() });
     return interaction.reply({ content: 'Your rank-change request was sent to staff.', ephemeral: true });
   }
 
@@ -47,7 +47,7 @@ async function handleVerification(interaction) {
     record.rank = rank;
     saveData();
     const roleFound = await setRankRole(member, rank).catch(() => false);
-    await safeDm(target, new EmbedBuilder().setColor(0x57f287).setTitle('Rank updated').setDescription(`Your rank is now **${rank}**.`).setFooter({ text: 'If you have questions, contact staff.' }));
+    await safeDm(target, makeEmbed().setTitle('Rank updated').setDescription(`Your rank is now **${rank}**.`));
     return interaction.reply({ content: `${target} rank changed from **${previous}** to **${rank}**.${roleFound ? '' : ' No Discord role was changed because no matching role was found.'}`, ephemeral: true });
   }
 
@@ -73,7 +73,7 @@ async function handleVerification(interaction) {
     }
     saveData();
     const action = interaction.commandName === 'trust' ? 'trusted' : 'untrusted';
-    await safeDm(target, new EmbedBuilder().setColor(action === 'trusted' ? 0x57f287 : 0xed4245).setTitle(`You are ${action}`).setDescription(`Location: **${location}**`));
+    await safeDm(target, makeEmbed().setTitle(`You are ${action}`).setDescription(`Location: **${location}**`));
     return interaction.reply({ content: `${target} is now ${action} at **${location}**.`, ephemeral: true });
   }
 }
@@ -89,7 +89,7 @@ async function handleVerificationPrefix(message, args) {
       if (!RANKS.includes(rank)) return message.reply(`Choose one of: ${RANKS.join(', ')}.`);
       const channel = await message.client.channels.fetch(STAFF_CHANNEL_ID).catch(() => null);
       if (!channel?.isTextBased()) return message.reply('The rank-request channel is not available.');
-      await channel.send({ embeds: [new EmbedBuilder().setColor(0x5865f2).setTitle('Rank change request').addFields({ name: 'Member', value: `${message.author} (${message.author.id})` }, { name: 'Requested rank', value: rank }).setTimestamp()] });
+      await channel.send({ embeds: [makeEmbed().setTitle('Rank change request').addFields({ name: 'Member', value: `${message.author} (${message.author.id})` }, { name: 'Requested rank', value: rank }).setTimestamp()], files: logoFile() });
       return message.reply('Your rank-change request was sent to staff.');
     }
     if (subcommand === 'change') {
@@ -102,7 +102,7 @@ async function handleVerificationPrefix(message, args) {
       record.rank = rank;
       saveData();
       const roleFound = await setRankRole(member, rank).catch(() => false);
-      await safeDm(mentioned, new EmbedBuilder().setColor(0x57f287).setTitle('Rank updated').setDescription(`Your rank is now **${rank}**.`));
+      await safeDm(mentioned, makeEmbed().setTitle('Rank updated').setDescription(`Your rank is now **${rank}**.`));
       return message.reply(`${mentioned} rank changed from **${previous}** to **${rank}**.${roleFound ? '' : ' No matching Discord role was found.'}`);
     }
   }
@@ -129,7 +129,7 @@ async function handleVerificationPrefix(message, args) {
     if (command === 'untrust') record.trustedLocations = record.trustedLocations.filter((item) => !matching(item));
     saveData();
     const action = command === 'trust' ? 'trusted' : 'untrusted';
-    await safeDm(mentioned, new EmbedBuilder().setColor(action === 'trusted' ? 0x57f287 : 0xed4245).setTitle(`You are ${action}`).setDescription(`Location: **${location}**`));
+    await safeDm(mentioned, makeEmbed().setTitle(`You are ${action}`).setDescription(`Location: **${location}**`));
     return message.reply(`${mentioned} is now ${action} at **${location}**.`);
   }
 }
