@@ -1,10 +1,12 @@
 # mihulish
 
-Discord bot for MIHU player-warps. All bot records are stored in a **SQLite** database at `data/bot-data.db` (WAL mode, atomic writes) using `better-sqlite3`. On first launch the bot **automatically migrates** an existing `data/bot-data.json` into SQLite — the JSON file is kept as a backup. The database must live on a persistent disk/volume when hosted (GitHub Actions runners and ephemeral bot hosts lose files between runs).
+Discord bot for MIHU player-warps. All bot records are stored in a **SQLite** database at `data/bot-data.db` (WAL mode, atomic writes) using **Node's built-in `node:sqlite`** module — no native dependencies, no compilation, no install scripts. This makes it deployable on bot-hosting providers that block native module builds.
+
+On first launch the bot **automatically migrates** an existing `data/bot-data.json` into SQLite — the JSON file is kept as a backup. The database must live on a persistent disk/volume when hosted (GitHub Actions runners and ephemeral bot hosts lose files between runs).
 
 ## Requirements
 
-- **Node.js ≥ 22** (required by `better-sqlite3` v13). `better-sqlite3` uses prebuilt binaries for common platforms, so no compiler toolchain is needed.
+- **Node.js ≥ 22.5** (required for the built-in `node:sqlite` module; works on 22.5+/23.4+, the bot-hosting daemon runs v24).
 
 ## Setup
 
@@ -26,13 +28,16 @@ Run locally with `npm start`. The bot registers commands at start-up.
 
 > **Migrating from JSON:** if a `data/bot-data.json` exists from an older version, the bot imports it into SQLite on the first run. After confirming the migration, you may delete the JSON backup if you want.
 
+> **`node_modules` is not committed to git.** Run `npm install` on the host so dependencies are built fresh. A `.npmrc` with `allow-scripts=true` is included so npm can run the required package install scripts.
+
 ## File Structure
 
 ```
 mihulish/
 ├── index.js                    # Client setup, event routing, command loader
-├── database.js                 # SQLite storage layer (better-sqlite3)
+├── database.js                 # SQLite storage layer (Node built-in node:sqlite)
 ├── utils.js                    # Shared helpers (data, permissions, DM, ranks)
+├── .npmrc                      # allow-scripts=true (clean dependency install)
 ├── data/
 │   ├── bot-data.db             # Persistent SQLite database (auto-created)
 │   └── bot-data.json           # Legacy JSON backup (migrated on first run)
@@ -53,6 +58,7 @@ mihulish/
 
 - All bot records (users, points, ranks, warnings, wall of fame, items, subscriptions, sessions, coins, giveaways, custom commands, claim cooldowns) are stored in `data/bot-data.db`.
 - Writes are performed in a **single SQLite transaction** (atomic and crash-safe), which avoids the corrupted-JSON problem when a host kills the process mid-write.
+- The storage engine is **Node's built-in `node:sqlite`** — no native module, so it works on hosts that block `node-gyp rebuild`/install scripts (unlike `better-sqlite3`).
 - The DB file is ignored by git (`data/`, `*.db`, `*.db-wal`, `*.db-shm`). Keep `data/` on a persistent volume on GitHub/bot-hosting so records survive restarts.
 
 ## Commands

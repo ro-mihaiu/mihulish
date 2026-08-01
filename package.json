@@ -22,8 +22,7 @@
   },
   "homepage": "https://github.com/ro-mihaiu/mihulish#readme",
   "dependencies": {
-    "better-sqlite3": "^13.0.2",
-    "discord.js": "^14.27.0",
+    "discord.js": "14.27.0",
     "dotenv": "^17.4.2"
   }
 }

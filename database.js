@@ -1,5 +1,9 @@
-// ─── SQLite storage layer ───────────────────────────────────────────────────
-// Persists all bot records in data/bot-data.db using better-sqlite3 (WAL mode).
+// ─── SQLite storage layer (Node built-in, no native dependencies) ──────────
+// Persists all bot records in data/bot-data.db using Node's built-in
+// `node:sqlite` module (available in Node >= 22.5). This requires NO native
+// compilation and NO install scripts, so it works on bot-hosting providers
+// that block `node-gyp rebuild` and native modules like better-sqlite3.
+//
 // The in-memory data shape is identical to the old data/bot-data.json format,
 // so command modules keep working via `data` + `saveData()` from utils.js.
 //
@@ -8,7 +12,7 @@
 // as a backup).
 const fs = require('node:fs');
 const path = require('node:path');
-const Database = require('better-sqlite3');
+const { DatabaseSync } = require('node:sqlite');
 
 const DATA_DIR = path.join(__dirname, 'data');
 const DB_PATH = path.join(DATA_DIR, 'bot-data.db');
@@ -30,9 +34,9 @@ const DEFAULT_STATE = {
 
 // ─── Open database (WAL mode for atomic, crash-safe writes) ────────────────
 fs.mkdirSync(DATA_DIR, { recursive: true });
-const db = new Database(DB_PATH);
-db.pragma('journal_mode = WAL');
-db.pragma('synchronous = NORMAL');
+const db = new DatabaseSync(DB_PATH);
+db.exec('PRAGMA journal_mode = WAL');
+db.exec('PRAGMA synchronous = NORMAL');
 
 db.exec(`
 CREATE TABLE IF NOT EXISTS users (
@@ -108,71 +112,79 @@ CREATE TABLE IF NOT EXISTS claims (
 `);
 
 // ─── Save entire state to SQLite inside one atomic transaction ─────────────
-const saveData = db.transaction((state) => {
-  db.prepare('DELETE FROM users').run();
-  db.prepare('DELETE FROM warnings').run();
-  db.prepare('DELETE FROM wall_of_fame').run();
-  db.prepare('DELETE FROM items').run();
-  db.prepare('DELETE FROM subscriptions').run();
-  db.prepare('DELETE FROM sessions').run();
-  db.prepare('DELETE FROM coins').run();
-  db.prepare('DELETE FROM giveaways').run();
-  db.prepare('DELETE FROM custom_commands').run();
-  db.prepare('DELETE FROM claims').run();
-  db.prepare("DELETE FROM meta WHERE key = 'nextWarningId'").run();
+function saveData(state) {
+  db.exec('BEGIN TRANSACTION');
+  try {
+    db.prepare('DELETE FROM users').run();
+    db.prepare('DELETE FROM warnings').run();
+    db.prepare('DELETE FROM wall_of_fame').run();
+    db.prepare('DELETE FROM items').run();
+    db.prepare('DELETE FROM subscriptions').run();
+    db.prepare('DELETE FROM sessions').run();
+    db.prepare('DELETE FROM coins').run();
+    db.prepare('DELETE FROM giveaways').run();
+    db.prepare('DELETE FROM custom_commands').run();
+    db.prepare('DELETE FROM claims').run();
+    db.prepare("DELETE FROM meta WHERE key = 'nextWarningId'").run();
 
-  const insertUser = db.prepare('INSERT INTO users (user_id, points, rank, in_game_user, trusted_locations) VALUES (?, ?, ?, ?, ?)');
-  for (const [id, u] of Object.entries(state.users || {})) {
-    insertUser.run(id, u.points ?? 0, u.rank ?? null, u.inGameUser ?? null, JSON.stringify(u.trustedLocations || []));
+    const insertUser = db.prepare('INSERT INTO users (user_id, points, rank, in_game_user, trusted_locations) VALUES (?, ?, ?, ?, ?)');
+    for (const [id, u] of Object.entries(state.users || {})) {
+      insertUser.run(id, u.points ?? 0, u.rank ?? null, u.inGameUser ?? null, JSON.stringify(u.trustedLocations || []));
+    }
+
+    const insertWarning = db.prepare('INSERT INTO warnings (id, user_id, reason, staff_id, created_at) VALUES (?, ?, ?, ?, ?)');
+    for (const w of state.warnings || []) {
+      insertWarning.run(w.id, w.userId, w.reason, w.staffId, w.createdAt);
+    }
+
+    db.prepare('INSERT INTO meta (key, value) VALUES (?, ?)').run('nextWarningId', String(state.nextWarningId ?? 1));
+
+    const insertWof = db.prepare('INSERT INTO wall_of_fame (user_id) VALUES (?)');
+    for (const id of state.wallOfFame || []) {
+      insertWof.run(id);
+    }
+
+    const insertItem = db.prepare('INSERT INTO items (name, type, price, min_amount, stock, created_at) VALUES (?, ?, ?, ?, ?, ?)');
+    for (const it of Object.values(state.items || {})) {
+      insertItem.run(it.name, it.type, it.price, it.minAmount, it.stock, it.createdAt);
+    }
+
+    const insertSub = db.prepare('INSERT INTO subscriptions (user_id, tokens, history) VALUES (?, ?, ?)');
+    for (const [id, sub] of Object.entries(state.subscriptions || {})) {
+      insertSub.run(id, sub.tokens ?? 0, JSON.stringify(sub.history || []));
+    }
+
+    const insertSession = db.prepare('INSERT INTO sessions (user_id, gear, active, start_time, end_time, hours, history) VALUES (?, ?, ?, ?, ?, ?, ?)');
+    for (const [id, s] of Object.entries(state.sessions || {})) {
+      insertSession.run(id, JSON.stringify(s.gear || []), s.active ? 1 : 0, s.startTime ?? null, s.endTime ?? null, s.hours ?? 0, JSON.stringify(s.history || []));
+    }
+
+    const insertCoin = db.prepare('INSERT INTO coins (user_id, balance) VALUES (?, ?)');
+    for (const [id, bal] of Object.entries(state.coins || {})) {
+      insertCoin.run(id, bal ?? 0);
+    }
+
+    const insertGw = db.prepare('INSERT INTO giveaways (message_id, channel_id, guild_id, host_id, prize, winners, end_time, ended) VALUES (?, ?, ?, ?, ?, ?, ?, ?)');
+    for (const g of state.giveaways || []) {
+      insertGw.run(g.messageId, g.channelId, g.guildId, g.hostId, g.prize, g.winners, g.endTime, g.ended ? 1 : 0);
+    }
+
+    const insertCmd = db.prepare('INSERT INTO custom_commands (name, content, staff_id, created_at) VALUES (?, ?, ?, ?)');
+    for (const [name, c] of Object.entries(state.customCommands || {})) {
+      insertCmd.run(name, c.content, c.staffId, c.createdAt);
+    }
+
+    const insertClaim = db.prepare('INSERT INTO claims (user_id, daily, weekly, monthly) VALUES (?, ?, ?, ?)');
+    for (const [id, cl] of Object.entries(state.claims || {})) {
+      insertClaim.run(id, cl.daily ?? 0, cl.weekly ?? 0, cl.monthly ?? 0);
+    }
+
+    db.exec('COMMIT');
+  } catch (error) {
+    db.exec('ROLLBACK');
+    throw error;
   }
-
-  const insertWarning = db.prepare('INSERT INTO warnings (id, user_id, reason, staff_id, created_at) VALUES (?, ?, ?, ?, ?)');
-  for (const w of state.warnings || []) {
-    insertWarning.run(w.id, w.userId, w.reason, w.staffId, w.createdAt);
-  }
-
-  db.prepare('INSERT INTO meta (key, value) VALUES (?, ?)').run('nextWarningId', String(state.nextWarningId ?? 1));
-
-  const insertWof = db.prepare('INSERT INTO wall_of_fame (user_id) VALUES (?)');
-  for (const id of state.wallOfFame || []) {
-    insertWof.run(id);
-  }
-
-  const insertItem = db.prepare('INSERT INTO items (name, type, price, min_amount, stock, created_at) VALUES (?, ?, ?, ?, ?, ?)');
-  for (const it of Object.values(state.items || {})) {
-    insertItem.run(it.name, it.type, it.price, it.minAmount, it.stock, it.createdAt);
-  }
-
-  const insertSub = db.prepare('INSERT INTO subscriptions (user_id, tokens, history) VALUES (?, ?, ?)');
-  for (const [id, sub] of Object.entries(state.subscriptions || {})) {
-    insertSub.run(id, sub.tokens ?? 0, JSON.stringify(sub.history || []));
-  }
-
-  const insertSession = db.prepare('INSERT INTO sessions (user_id, gear, active, start_time, end_time, hours, history) VALUES (?, ?, ?, ?, ?, ?, ?)');
-  for (const [id, s] of Object.entries(state.sessions || {})) {
-    insertSession.run(id, JSON.stringify(s.gear || []), s.active ? 1 : 0, s.startTime ?? null, s.endTime ?? null, s.hours ?? 0, JSON.stringify(s.history || []));
-  }
-
-  const insertCoin = db.prepare('INSERT INTO coins (user_id, balance) VALUES (?, ?)');
-  for (const [id, bal] of Object.entries(state.coins || {})) {
-    insertCoin.run(id, bal ?? 0);
-  }
-
-  const insertGw = db.prepare('INSERT INTO giveaways (message_id, channel_id, guild_id, host_id, prize, winners, end_time, ended) VALUES (?, ?, ?, ?, ?, ?, ?, ?)');
-  for (const g of state.giveaways || []) {
-    insertGw.run(g.messageId, g.channelId, g.guildId, g.hostId, g.prize, g.winners, g.endTime, g.ended ? 1 : 0);
-  }
-
-  const insertCmd = db.prepare('INSERT INTO custom_commands (name, content, staff_id, created_at) VALUES (?, ?, ?, ?)');
-  for (const [name, c] of Object.entries(state.customCommands || {})) {
-    insertCmd.run(name, c.content, c.staffId, c.createdAt);
-  }
-
-  const insertClaim = db.prepare('INSERT INTO claims (user_id, daily, weekly, monthly) VALUES (?, ?, ?, ?)');
-  for (const [id, cl] of Object.entries(state.claims || {})) {
-    insertClaim.run(id, cl.daily ?? 0, cl.weekly ?? 0, cl.monthly ?? 0);
-  }
-});
+}
 
 // ─── Load entire state from SQLite back into the legacy object shape ───────
 function loadData() {
