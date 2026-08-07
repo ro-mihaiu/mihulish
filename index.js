@@ -278,14 +278,14 @@ client.on('interactionCreate', async (interaction) => {
   try {
     const { commandName } = interaction;
 
-    // Log every slash command used
-    await logCommand({
+    // Log every slash command used (fire-and-forget so it never blocks the reply).
+    logCommand({
       command: `/${commandName}`,
       input: buildSlashInput(interaction),
       user: interaction.user,
       channelName: interaction.channel?.name,
       client: interaction.client,
-    });
+    }).catch(() => {});
 
     // Route to the correct module handler
     const handlerMap = {
@@ -335,9 +335,13 @@ client.on('interactionCreate', async (interaction) => {
     return interaction.reply({ content: 'Command handler not found.', ephemeral: true });
   } catch (error) {
     console.error('Interaction error:', error);
-    const reply = { content: 'Something went wrong while processing that command.', ephemeral: true };
-    if (interaction.replied || interaction.deferred) await interaction.followUp(reply);
-    else await interaction.reply(reply);
+    try {
+      const reply = { content: 'Something went wrong while processing that command.', ephemeral: true };
+      if (interaction.replied || interaction.deferred) await interaction.followUp(reply);
+      else await interaction.reply(reply);
+    } catch (replyError) {
+      console.error('Failed to send error reply:', replyError);
+    }
   }
 });
 
@@ -350,14 +354,14 @@ client.on('messageCreate', async (message) => {
 
   if (!command) return;
 
-  // Log every prefix command used (including .help and custom tags)
-  await logCommand({
+  // Log every prefix command used (including .help and custom tags) — fire-and-forget.
+  logCommand({
     command: `.${command}`,
     input: args.slice(1).join(' '),
     user: message.author,
     channelName: message.channel?.name,
     client: message.client,
-  });
+  }).catch(() => {});
 
   // Help command
   if (command === 'help') return message.reply({ embeds: [buildHelpEmbed()] });
@@ -412,8 +416,25 @@ client.on('messageCreate', async (message) => {
     }
   } catch (error) {
     console.error('Prefix command error:', error);
-    return message.reply('Something went wrong while processing that command.');
+    try {
+      await message.reply('Something went wrong while processing that command.');
+    } catch (replyError) {
+      console.error('Failed to send prefix error reply:', replyError);
+    }
   }
+});
+
+// ─── Global error handling (never let the bot crash) ─────────────────────────
+client.on('error', (error) => {
+  console.error('Discord client error:', error);
+});
+
+process.on('unhandledRejection', (reason) => {
+  console.error('Unhandled promise rejection:', reason);
+});
+
+process.on('uncaughtException', (error) => {
+  console.error('Uncaught exception:', error);
 });
 
 // ─── Login ──────────────────────────────────────────────────────────────────
