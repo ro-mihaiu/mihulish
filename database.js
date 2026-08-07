@@ -30,6 +30,7 @@ const DEFAULT_STATE = {
   giveaways: [],
   customCommands: {},
   claims: {},
+  trustDashboards: {},
 };
 
 // ─── Open database (WAL mode for atomic, crash-safe writes) ────────────────
@@ -72,6 +73,7 @@ CREATE TABLE IF NOT EXISTS items (
 CREATE TABLE IF NOT EXISTS subscriptions (
   user_id TEXT PRIMARY KEY,
   tokens INTEGER NOT NULL DEFAULT 0,
+  expires_at INTEGER,
   history TEXT NOT NULL DEFAULT '[]'
 );
 CREATE TABLE IF NOT EXISTS sessions (
@@ -111,6 +113,13 @@ CREATE TABLE IF NOT EXISTS claims (
 );
 `);
 
+// ─── Schema migration: add columns introduced after the original release ──
+try {
+  db.exec('ALTER TABLE subscriptions ADD COLUMN expires_at INTEGER');
+} catch (error) {
+  // Column already exists — safe to ignore.
+}
+
 // ─── Save entire state to SQLite inside one atomic transaction ─────────────
 function saveData(state) {
   db.exec('BEGIN TRANSACTION');
@@ -149,9 +158,9 @@ function saveData(state) {
       insertItem.run(it.name, it.type, it.price, it.minAmount, it.stock, it.createdAt);
     }
 
-    const insertSub = db.prepare('INSERT INTO subscriptions (user_id, tokens, history) VALUES (?, ?, ?)');
+    const insertSub = db.prepare('INSERT INTO subscriptions (user_id, tokens, expires_at, history) VALUES (?, ?, ?, ?)');
     for (const [id, sub] of Object.entries(state.subscriptions || {})) {
-      insertSub.run(id, sub.tokens ?? 0, JSON.stringify(sub.history || []));
+      insertSub.run(id, sub.tokens ?? 0, sub.expiresAt ?? null, JSON.stringify(sub.history || []));
     }
 
     const insertSession = db.prepare('INSERT INTO sessions (user_id, gear, active, start_time, end_time, hours, history) VALUES (?, ?, ?, ?, ?, ?, ?)');
@@ -213,7 +222,7 @@ function loadData() {
   }
 
   for (const row of db.prepare('SELECT * FROM subscriptions').all()) {
-    state.subscriptions[row.user_id] = { tokens: row.tokens, history: JSON.parse(row.history) };
+    state.subscriptions[row.user_id] = { tokens: row.tokens, expiresAt: row.expires_at ?? null, history: JSON.parse(row.history) };
   }
 
   for (const row of db.prepare('SELECT * FROM sessions').all()) {

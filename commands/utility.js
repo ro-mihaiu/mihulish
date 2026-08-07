@@ -1,5 +1,6 @@
 const { SlashCommandBuilder } = require('discord.js');
 const { data, saveData, requireStaff, makeEmbed, logoFile } = require('../utils');
+const { rebuildAllTrustDashboards } = require('./verification');
 
 const commandDefinitions = [
   new SlashCommandBuilder().setName('gw').setDescription('Manage giveaways')
@@ -124,6 +125,7 @@ function EmbedBuilderFrom(embed) {
 
 async function handleUpdate(interaction) {
   if (!await requireStaff(interaction)) return;
+  await rebuildAllTrustDashboards(interaction.guild);
   return interaction.reply({ content: 'Dashboard channels updated.', ephemeral: true });
 }
 

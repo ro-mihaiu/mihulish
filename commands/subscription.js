@@ -1,5 +1,8 @@
 const { SlashCommandBuilder } = require('discord.js');
-const { data, saveData, requireStaff, safeDm, makeEmbed, logoFile } = require('../utils');
+const { data, saveData, requireStaff, isStaff, safeDm, makeEmbed, logoFile, STAFF_PING_CHANNEL_ID, staffRoleIds } = require('../utils');
+
+const DAYS_PER_TOKEN = 30;
+const EXPIRY_WARNING_DAYS = 3;
 
 const commandDefinitions = [
   new SlashCommandBuilder().setName('subscription').setDescription('Manage subscriptions')
@@ -10,6 +13,7 @@ const commandDefinitions = [
       .addUserOption((option) => option.setName('member').setDescription('Member').setRequired(true))
       .addIntegerOption((option) => option.setName('amount').setDescription('Number of tokens to remove').setRequired(false))),
   new SlashCommandBuilder().setName('mysubscription').setDescription('View your subscription'),
+  new SlashCommandBuilder().setName('subscriptions').setDescription('View all subscriptions (staff)'),
   new SlashCommandBuilder().setName('session').setDescription('Manage rental sessions')
     .addSubcommand((sub) => sub.setName('add').setDescription('Add gear to session')
       .addStringOption((option) => option.setName('item').setDescription('Item name').setRequired(true)))
@@ -22,6 +26,79 @@ const commandDefinitions = [
     .addSubcommand((sub) => sub.setName('history').setDescription('View session history')),
 ];
 
+// ─── Helpers ────────────────────────────────────────────────────────────────
+function ensureSubscription(userId) {
+  if (!data.subscriptions[userId]) {
+    data.subscriptions[userId] = { tokens: 0, history: [] };
+  }
+  return data.subscriptions[userId];
+}
+
+function daysLeft(sub) {
+  if (!sub || !sub.expiresAt) return sub?.tokens ? sub.tokens * DAYS_PER_TOKEN : 0;
+  return Math.max(0, Math.round((sub.expiresAt - Date.now()) / 86400000));
+}
+
+function addDaysToSubscription(sub, tokens) {
+  const base = sub.expiresAt && sub.expiresAt > Date.now() ? sub.expiresAt : Date.now();
+  sub.tokens += tokens;
+  sub.expiresAt = base + (tokens * DAYS_PER_TOKEN * 86400000);
+  return sub;
+}
+
+function formatExpiry(sub) {
+  if (!sub || !sub.expiresAt) return null;
+  const left = daysLeft(sub);
+  if (left <= 0) return 'expired';
+  return `<t:${Math.floor(sub.expiresAt / 1000)}:d> (${left}d left)`;
+}
+
+// ─── checkSubscriptions: DM the user + ping staff when a sub is expiring ──
+async function checkSubscriptions(client) {
+  try {
+    const now = Date.now();
+    const warningWindow = EXPIRY_WARNING_DAYS * 86400000;
+
+    for (const [userId, sub] of Object.entries(data.subscriptions || {})) {
+      if (!sub || sub.tokens <= 0 || !sub.expiresAt) continue;
+      const msLeft = sub.expiresAt - now;
+
+      // Expired: zero it out.
+      if (msLeft <= 0) {
+        sub.tokens = 0;
+        saveData();
+        try {
+          const user = await client.users.fetch(userId).catch(() => null);
+          if (user) await safeDm(user, makeEmbed().setTitle('Subscription expired').setDescription('Your rental subscription has expired. Contact staff to renew.'));
+        } catch (error) { console.error('Failed to DM on expiry:', error); }
+        continue;
+      }
+
+      // Expiring within the warning window: DM the user and ping staff.
+      if (msLeft <= warningWindow) {
+        const days = Math.ceil(msLeft / 86400000);
+        try {
+          const user = await client.users.fetch(userId).catch(() => null);
+          if (user) await safeDm(user, makeEmbed().setTitle('Subscription expiring soon').setDescription(`Your rental subscription expires in **${days} day(s)** — <t:${Math.floor(sub.expiresAt / 1000)}:F>. Contact staff to renew.`));
+        } catch (error) { console.error('Failed to DM expiry warning:', error); }
+
+        if (STAFF_PING_CHANNEL_ID) {
+          try {
+            const channel = await client.channels.fetch(STAFF_PING_CHANNEL_ID).catch(() => null);
+            if (channel?.isTextBased()) {
+              const roleMentions = [...staffRoleIds].map((id) => `<@&${id}>`).join(' ');
+              await channel.send({ embeds: [makeEmbed().setTitle('⏳ Subscription expiring').setDescription(`${roleMentions}\n<@${userId}>'s rental subscription expires in **${days} day(s)** — <t:${Math.floor(sub.expiresAt / 1000)}:F>.`)] });
+            }
+          } catch (error) { console.error('Failed to ping staff:', error); }
+        }
+      }
+    }
+  } catch (error) {
+    console.error('checkSubscriptions error:', error);
+  }
+}
+
+// ─── Slash handler ──────────────────────────────────────────────────────────
 async function handleSubscription(interaction) {
   const subcommand = interaction.options.getSubcommand(false);
   const target = interaction.options.getUser('member');
@@ -31,36 +108,26 @@ async function handleSubscription(interaction) {
     if (!await requireStaff(interaction)) return;
 
     if (subcommand === 'add') {
-      const now = Date.now();
-      if (!data.subscriptions[target.id]) {
-        data.subscriptions[target.id] = { tokens: 0, history: [] };
-      }
-      data.subscriptions[target.id].tokens += amount;
-      data.subscriptions[target.id].history.push({
-        type: 'add',
-        amount,
-        staffId: interaction.user.id,
-        timestamp: now
-      });
+      const sub = ensureSubscription(target.id);
+      addDaysToSubscription(sub, amount);
+      sub.history.push({ type: 'add', amount, staffId: interaction.user.id, timestamp: Date.now() });
       saveData();
-      await safeDm(target, makeEmbed().setTitle('Subscription updated').setDescription(`You received **${amount}** rental token(s). Total: ${data.subscriptions[target.id].tokens}.`));
-      return interaction.reply({ content: `Added **${amount}** token(s) to ${target}. They have ${data.subscriptions[target.id].tokens} token(s) total.`, ephemeral: true });
+      const text = `${target} received **${amount}** token(s) (**${amount * DAYS_PER_TOKEN}** days). Expires: ${formatExpiry(sub)}.`;
+      await safeDm(target, makeEmbed().setTitle('Subscription updated').setDescription(`You received **${amount}** rental token(s) (**${amount * DAYS_PER_TOKEN}** days). New expiry: ${formatExpiry(sub)}.`));
+      return interaction.reply({ content: text, ephemeral: true });
     }
 
     if (subcommand === 'remove') {
-      if (!data.subscriptions[target.id] || data.subscriptions[target.id].tokens < amount) {
-        return interaction.reply({ content: `${target} does not have enough tokens. They have ${data.subscriptions[target.id]?.tokens ?? 0}.`, ephemeral: true });
+      const sub = data.subscriptions[target.id];
+      if (!sub || sub.tokens < amount) {
+        return interaction.reply({ content: `${target} does not have enough tokens. They have ${sub?.tokens ?? 0}.`, ephemeral: true });
       }
-      data.subscriptions[target.id].tokens -= amount;
-      data.subscriptions[target.id].history.push({
-        type: 'remove',
-        amount,
-        staffId: interaction.user.id,
-        timestamp: Date.now()
-      });
+      sub.tokens -= amount;
+      if (sub.tokens <= 0) sub.expiresAt = null;
+      sub.history.push({ type: 'remove', amount, staffId: interaction.user.id, timestamp: Date.now() });
       saveData();
-      await safeDm(target, makeEmbed().setTitle('Subscription updated').setDescription(`${amount} rental token(s) were removed. Remaining: ${data.subscriptions[target.id].tokens}.`));
-      return interaction.reply({ content: `Removed **${amount}** token(s) from ${target}. They have ${data.subscriptions[target.id].tokens} token(s) left.`, ephemeral: true });
+      await safeDm(target, makeEmbed().setTitle('Subscription updated').setDescription(`${amount} rental token(s) were removed. Remaining: ${sub.tokens}.`));
+      return interaction.reply({ content: `Removed **${amount}** token(s) from ${target}. They have ${sub.tokens} token(s) left.`, ephemeral: true });
     }
   }
 
@@ -69,10 +136,20 @@ async function handleSubscription(interaction) {
     if (!sub || sub.tokens <= 0) {
       return interaction.reply({ content: 'You have no active subscription tokens.', ephemeral: true });
     }
-    return interaction.reply({ content: `You have **${sub.tokens}** rental token(s). Each token = ~30 days.`, ephemeral: true });
+    return interaction.reply({ content: `You have **${sub.tokens}** rental token(s) (**${daysLeft(sub)}** days left). Expires: ${formatExpiry(sub)}.`, ephemeral: true });
+  }
+
+  if (interaction.commandName === 'subscriptions') {
+    if (!await requireStaff(interaction)) return;
+    const entries = Object.entries(data.subscriptions || {})
+      .filter(([, sub]) => sub && sub.tokens > 0)
+      .map(([id, sub]) => `<@${id}> — **${sub.tokens}** tokens (**${daysLeft(sub)}** days) — ${formatExpiry(sub)}`)
+      .join('\n') || 'No active subscriptions.';
+    return interaction.reply({ embeds: [makeEmbed().setTitle('📋 All Subscriptions').setDescription(entries.slice(0, 4096))], files: logoFile(), ephemeral: true });
   }
 }
 
+// ─── Session handler (unchanged) ────────────────────────────────────────────
 async function handleSession(interaction) {
   const subcommand = interaction.options.getSubcommand(true);
   const userId = interaction.user.id;
@@ -167,41 +244,52 @@ async function handleSession(interaction) {
   }
 }
 
+// ─── Prefix handler ─────────────────────────────────────────────────────────
 async function handleSubscriptionPrefix(message, args) {
   const [command, subcommand, ...rest] = args;
   const mentioned = message.mentions.users.first();
   const amount = Number(rest[rest.length - 1]) || 1;
 
   if (command === 'subscription') {
+    if (!isStaff(message.member)) return message.reply('This command is for staff only.');
     if (!mentioned) return message.reply(`Usage: \`.subscription ${subcommand} @member [amount]\``);
 
     if (subcommand === 'add') {
-      if (!data.subscriptions[mentioned.id]) {
-        data.subscriptions[mentioned.id] = { tokens: 0, history: [] };
-      }
-      data.subscriptions[mentioned.id].tokens += amount;
-      data.subscriptions[mentioned.id].history.push({ type: 'add', amount, staffId: message.author.id, timestamp: Date.now() });
+      const sub = ensureSubscription(mentioned.id);
+      addDaysToSubscription(sub, amount);
+      sub.history.push({ type: 'add', amount, staffId: message.author.id, timestamp: Date.now() });
       saveData();
-      await safeDm(mentioned, makeEmbed().setTitle('Subscription updated').setDescription(`You received **${amount}** rental token(s). Total: ${data.subscriptions[mentioned.id].tokens}.`));
-      return message.reply(`Added **${amount}** token(s) to ${mentioned}. Total: ${data.subscriptions[mentioned.id].tokens}.`);
+      await safeDm(mentioned, makeEmbed().setTitle('Subscription updated').setDescription(`You received **${amount}** rental token(s) (**${amount * DAYS_PER_TOKEN}** days). New expiry: ${formatExpiry(sub)}.`));
+      return message.reply(`Added **${amount}** token(s) (**${amount * DAYS_PER_TOKEN}** days) to ${mentioned}. Expires: ${formatExpiry(sub)}.`);
     }
 
     if (subcommand === 'remove') {
-      if (!data.subscriptions[mentioned.id] || data.subscriptions[mentioned.id].tokens < amount) {
-        return message.reply(`${mentioned} has only ${data.subscriptions[mentioned.id]?.tokens ?? 0} token(s).`);
+      const sub = data.subscriptions[mentioned.id];
+      if (!sub || sub.tokens < amount) {
+        return message.reply(`${mentioned} has only ${sub?.tokens ?? 0} token(s).`);
       }
-      data.subscriptions[mentioned.id].tokens -= amount;
-      data.subscriptions[mentioned.id].history.push({ type: 'remove', amount, staffId: message.author.id, timestamp: Date.now() });
+      sub.tokens -= amount;
+      if (sub.tokens <= 0) sub.expiresAt = null;
+      sub.history.push({ type: 'remove', amount, staffId: message.author.id, timestamp: Date.now() });
       saveData();
-      await safeDm(mentioned, makeEmbed().setTitle('Subscription updated').setDescription(`${amount} rental token(s) were removed. Remaining: ${data.subscriptions[mentioned.id].tokens}.`));
-      return message.reply(`Removed **${amount}** token(s) from ${mentioned}. Remaining: ${data.subscriptions[mentioned.id].tokens}.`);
+      await safeDm(mentioned, makeEmbed().setTitle('Subscription updated').setDescription(`${amount} rental token(s) were removed. Remaining: ${sub.tokens}.`));
+      return message.reply(`Removed **${amount}** token(s) from ${mentioned}. Remaining: ${sub.tokens}.`);
     }
   }
 
   if (command === 'mysubscription') {
     const sub = data.subscriptions[message.author.id];
     if (!sub || sub.tokens <= 0) return message.reply('You have no active subscription tokens.');
-    return message.reply(`You have **${sub.tokens}** rental token(s). Each token = ~30 days.`);
+    return message.reply(`You have **${sub.tokens}** rental token(s) (**${daysLeft(sub)}** days left). Expires: ${formatExpiry(sub)}.`);
+  }
+
+  if (command === 'subscriptions') {
+    if (!isStaff(message.member)) return message.reply('This command is for staff only.');
+    const entries = Object.entries(data.subscriptions || {})
+      .filter(([, sub]) => sub && sub.tokens > 0)
+      .map(([id, sub]) => `<@${id}> — **${sub.tokens}** tokens (**${daysLeft(sub)}** days) — ${formatExpiry(sub)}`)
+      .join('\n') || 'No active subscriptions.';
+    return message.reply({ embeds: [makeEmbed().setTitle('📋 All Subscriptions').setDescription(entries.slice(0, 4096))], files: logoFile() });
   }
 
   if (command === 'session') {
@@ -277,5 +365,4 @@ async function handleSubscriptionPrefix(message, args) {
   }
 }
 
-module.exports = { commandDefinitions, handleSubscription, handleSession, handleSubscriptionPrefix };
-
+module.exports = { commandDefinitions, handleSubscription, handleSession, handleSubscriptionPrefix, checkSubscriptions };

@@ -33,6 +33,12 @@ const commandModules = [
 
 const slashCommands = commandModules.flatMap((mod) => mod.commandDefinitions.map((cmd) => cmd.toJSON()));
 
+// Named references to shared cross-module helpers used on startup/interval.
+const subMod = require('./commands/subscription');
+const verificationMod = require('./commands/verification');
+
+const CHECK_INTERVAL_MS = 10 * 60 * 1000; // every 10 minutes
+
 // ─── Help embed ─────────────────────────────────────────────────────────────
 function buildHelpEmbed() {
   const embed = makeEmbed()
@@ -44,11 +50,13 @@ function buildHelpEmbed() {
     {
       name: '📋 Verification',
       value:
-        '`.rank update <rank>` — request a rank change\n' +
-        '`.rank change @member <rank>` — [staff] change rank\n' +
-        '`.unverify @member` — [staff] remove from bot records\n' +
-        '`.trust @member <location>` — [staff] trust member\n' +
-        '`.untrust @member <location>` — [staff] remove trust\n' +
+        '`.verify <in-game-user> <rank>` — verify yourself\n' +
+        '`.setverify @member <in-game-user> <rank>` — [staff] force-verify a member\n' +
+'`.rank update <rank>` — request a rank change\n' +
+'`.rank change @member <rank>` — [staff] change rank\n' +
+'`.unverify @member` — [staff] remove from bot records\n' +
+'`.trust @member <location>` — [staff] trust member\n' +
+'`.untrust @member <location>` — [staff] remove trust\n' +
         '*(presets: mihu-farm, mihu-rentals, mihu-shop, mihu-casino, mihu-money, dungeon)*'
     },
     {
@@ -85,11 +93,12 @@ function buildHelpEmbed() {
         '`.subscription add @member [amount]` — [staff] add rental tokens\n' +
         '`.subscription remove @member [amount]` — [staff] remove tokens\n' +
         '`.mysubscription` — check your tokens\n' +
-        '`.session add|remove <item>` — [staff] manage session gear\n' +
+'`.subscriptions` — [staff] view all subscriptions\n' +
+'`.session add|remove <item>` - [staff] manage session gear\n' +
         '`.session check` — check session\n' +
         '`.session start <hours>` — [staff] start session\n' +
-        '`.session stop` — [staff] stop session\n' +
-        '`.session history` — view session history'
+'`.session stop` — [staff] stop session\n' +
+'`.session history` — view session history'
     },
     {
       name: '🎉 Fun',
@@ -197,6 +206,19 @@ client.once('ready', async () => {
   } catch (error) {
     console.error('Could not register commands:', error);
   }
+
+  // Startup: check expiring/expired subscriptions + rebuild trust dashboards.
+  subMod.checkSubscriptions(client);
+  if (client.guilds.cache.size) {
+    for (const guild of client.guilds.cache.values()) {
+      verificationMod.rebuildAllTrustDashboards(guild).catch((err) => console.error('Startup trust dashboard rebuild failed:', err));
+    }
+  }
+
+  // Periodic check so expiring subscriptions are caught even without commands.
+  setInterval(() => {
+    subMod.checkSubscriptions(client);
+  }, CHECK_INTERVAL_MS);
 });
 
 // ─── Member / moderation event logging ─────────────────────────────────────
@@ -268,6 +290,7 @@ client.on('interactionCreate', async (interaction) => {
     // Route to the correct module handler
     const handlerMap = {
       verify: 'handleVerify',
+      setverify: 'handleSetVerify',
       rank: 'handleVerification',
       unverify: 'handleVerification',
       trust: 'handleVerification',
@@ -283,6 +306,7 @@ client.on('interactionCreate', async (interaction) => {
       wof: 'handleRewards',
       item: 'handleShop',
       subscription: 'handleSubscription',
+      subscriptions: 'handleSubscription',
       mysubscription: 'handleSubscription',
       session: 'handleSession',
       coins: 'handleFun',
@@ -342,6 +366,7 @@ client.on('messageCreate', async (message) => {
     // Route to prefix handlers
     const prefixHandlerMap = {
       verify: 'handleVerifyPrefix',
+      setverify: 'handleSetVerifyPrefix',
       rank: 'handleVerificationPrefix',
       unverify: 'handleVerificationPrefix',
       trust: 'handleVerificationPrefix',
@@ -357,6 +382,7 @@ client.on('messageCreate', async (message) => {
       wof: 'handleRewardsPrefix',
       item: 'handleShopPrefix',
       subscription: 'handleSubscriptionPrefix',
+      subscriptions: 'handleSubscriptionPrefix',
       mysubscription: 'handleSubscriptionPrefix',
       session: 'handleSubscriptionPrefix',
       coins: 'handleFunPrefix',

@@ -12,6 +12,9 @@ const EMBED_URL = 'attachment://logo.png';
 const LOGO_PATH = path.join(__dirname, 'logo.png');
 const LOG_CHANNEL_ID = process.env.LOG_CHANNEL_ID;
 
+// Channel where staff alerts are sent (e.g. #pw-staff).
+const STAFF_PING_CHANNEL_ID = '1512391305068675213';
+
 function makeEmbed() {
   return new EmbedBuilder()
     .setColor(EMBED_COLOR)
@@ -56,6 +59,7 @@ data.coins ||= {};
 data.giveaways ||= [];
 data.customCommands ||= {};
 data.claims ||= {};
+data.trustDashboards ||= {};
 
 // Persist the in-memory data to SQLite (atomic, inside a single transaction).
 function saveData() {
@@ -90,5 +94,5 @@ async function setRankRole(member, rank) {
   return true;
 }
 
-module.exports = { data, saveData, userRecord, isStaff, requireStaff, safeDm, setRankRole, MAX_POINTS, RANKS, readData, makeEmbed, logoFile, logEvent, EMBED_COLOR, EMBED_URL };
+module.exports = { data, saveData, userRecord, isStaff, requireStaff, safeDm, setRankRole, MAX_POINTS, RANKS, readData, makeEmbed, logoFile, logEvent, EMBED_COLOR, EMBED_URL, STAFF_PING_CHANNEL_ID, staffRoleIds };
 

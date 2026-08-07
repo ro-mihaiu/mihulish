@@ -44,11 +44,11 @@ mihulish/
 ├── scripts/
 │   └── db-check.js             # SQLite storage smoke test (`npm run db-check`)
 └── commands/
-    ├── verification.js         # /rank, /unverify, /trust, /untrust
+    ├── verification.js         # /rank, /setverify, /unverify, /trust, /untrust, /verify
     ├── moderation.js           # /warn, /warnings, /warns
     ├── rewards.js              # /points, /wof
     ├── shop.js                 # /item add, /remove, /restocked
-    ├── subscription.js         # /subscription, /mysubscription, /session
+    ├── subscription.js         # /subscription, /subscriptions, /mysubscription, /session
     ├── fun.js                  # /coins, /cf
     ├── utility.js              # /gw, /update
     └── cmd.js                  # /cmd add, /remove, /list (custom tags)
@@ -66,6 +66,8 @@ mihulish/
 Both Discord slash commands (`/`) and prefix (`.`) commands work.
 
 ### Verification
+- `/verify <in_game_user> <rank>` — verify yourself with your in-game username and rank
+- `/setverify @member <in_game_user> <rank>` — [staff] force-verify a member (saves records and sets nickname)
 - `/rank update <rank>` — sends a rank change request to staff channel
 - `/rank change @member <rank>` — [staff] change a member's rank
 - `/unverify @member` — [staff] completely remove from bot records
@@ -97,9 +99,10 @@ Both Discord slash commands (`/`) and prefix (`.`) commands work.
 - `/item restocked <name> <amount>` — [staff] increase item stock
 
 ### Subscriptions / Rentals
-- `/subscription add @member [amount]` — [staff] add rental tokens (default 1 = ~30 days)
+- `/subscription add @member [amount]` — [staff] add rental tokens (default 1 = 30 days). Tokens now set an exact **expiry date**; adding more extends the expiry.
 - `/subscription remove @member [amount]` — [staff] remove rental tokens
-- `/mysubscription` — check your rental token count
+- `/subscriptions` — [staff] view all subscriptions with days remaining and expiry
+- `/mysubscription` — check your rental token count and expiry date
 - `/session add <item>` — [staff] add gear to session
 - `/session remove <item>` — [staff] remove gear from session
 - `/session check` — check current session status
@@ -129,6 +132,8 @@ Both Discord slash commands (`/`) and prefix (`.`) commands work.
 ## Prefix Examples
 
 ```
+.verify Mihaitzuuu Celestial
+.setverify @member Mihaitzuuu Celestial
 .rank update Samurai
 .rank change @member Samurai
 .unverify @member
@@ -155,6 +160,7 @@ Both Discord slash commands (`/`) and prefix (`.`) commands work.
 .item restocked Diamonds 50
 .subscription add @member 2
 .subscription remove @member 1
+.subscriptions
 .mysubscription
 .session add sword
 .session remove sword

@@ -341,5 +341,5 @@ async function handleModerationPrefix(message, args) {
   }
 }
 
-module.exports = { commandDefinitions, handleModeration, handleModerationPrefix };
+module.exports = { commandDefinitions, handleModeration, handleModerationPrefix, resolveMember };
 

@@ -1,5 +1,6 @@
 const { SlashCommandBuilder } = require('discord.js');
-const { data, saveData, userRecord, requireStaff, safeDm, setRankRole, RANKS, makeEmbed, logoFile } = require('../utils');
+const { data, saveData, userRecord, requireStaff, isStaff, safeDm, setRankRole, RANKS, makeEmbed, logoFile } = require('../utils');
+const { resolveMember } = require('./moderation');
 
 const STAFF_CHANNEL_ID = '1511566996632768663';
 const TRUST_LOCATIONS = ['mihu-farm', 'mihu-rentals', 'mihu-shop', 'mihu-casino', 'mihu-money', 'dungeon'];
@@ -23,6 +24,10 @@ const commandDefinitions = [
   new SlashCommandBuilder().setName('verify').setDescription('Verify yourself with your in-game user and rank')
     .addStringOption((option) => option.setName('in_game_user').setDescription('Your in-game username').setRequired(true))
     .addStringOption((option) => option.setName('rank').setDescription('Your rank').setRequired(true).addChoices(...RANKS.map((rank) => ({ name: rank, value: rank })))),
+  new SlashCommandBuilder().setName('setverify').setDescription('Force-verify a member with their in-game user and rank (staff)')
+    .addStringOption((option) => option.setName('member').setDescription('Member mention, username, or user ID').setRequired(true))
+    .addStringOption((option) => option.setName('in_game_user').setDescription('Target in-game username').setRequired(true))
+    .addStringOption((option) => option.setName('rank').setDescription('Target rank').setRequired(true).addChoices(...RANKS.map((rank) => ({ name: rank, value: rank })))),
 ];
 
 async function handleVerification(interaction) {
@@ -72,6 +77,7 @@ async function handleVerification(interaction) {
       record.trustedLocations = record.trustedLocations.filter((item) => !matching(item));
     }
     saveData();
+    await updateTrustDashboard(interaction.guild, location);
     const action = interaction.commandName === 'trust' ? 'trusted' : 'untrusted';
     await safeDm(target, makeEmbed().setTitle(`You are ${action}`).setDescription(`Location: **${location}**`));
     return interaction.reply({ content: `${target} is now ${action} at **${location}**.`, ephemeral: true });
@@ -128,6 +134,7 @@ async function handleVerificationPrefix(message, args) {
     if (command === 'trust' && !record.trustedLocations.some(matching)) record.trustedLocations.push(location);
     if (command === 'untrust') record.trustedLocations = record.trustedLocations.filter((item) => !matching(item));
     saveData();
+    await updateTrustDashboard(message.guild, location);
     const action = command === 'trust' ? 'trusted' : 'untrusted';
     await safeDm(mentioned, makeEmbed().setTitle(`You are ${action}`).setDescription(`Location: **${location}**`));
     return message.reply(`${mentioned} is now ${action} at **${location}**.`);
@@ -176,5 +183,107 @@ async function handleVerifyPrefix(message, args) {
   }
 }
 
-module.exports = { commandDefinitions, handleVerification, handleVerificationPrefix, handleVerify, handleVerifyPrefix };
+async function applySetVerify(member, inGameUser, canonicalRank) {
+  const record = userRecord(member.id);
+  record.inGameUser = inGameUser;
+  record.rank = canonicalRank;
+  saveData();
+  const nickname = `🌸 ${inGameUser}`;
+  await member.setNickname(nickname, 'MIHU bot force verification');
+  return nickname;
+}
 
+async function handleSetVerify(interaction) {
+  if (!await requireStaff(interaction)) return;
+  const memberInput = interaction.options.getString('member', true);
+  const inGameUser = interaction.options.getString('in_game_user', true).trim();
+  const rank = interaction.options.getString('rank', true);
+  const canonicalRank = RANKS.find((candidate) => candidate.toLowerCase() === rank.toLowerCase());
+  if (!canonicalRank) {
+    return interaction.reply({ content: `Invalid rank. Choose one of: ${RANKS.join(', ')}.`, ephemeral: true });
+  }
+  const member = await resolveMember(interaction.guild, memberInput);
+  if (!member) {
+    return interaction.reply({ content: `Could not find a member matching **${memberInput}**. Try mentioning them, using their username, or their user ID.`, ephemeral: true });
+  }
+  const target = member.user;
+  try {
+    const nickname = await applySetVerify(member, inGameUser, canonicalRank);
+    return interaction.reply({ content: `${target} has been force-verified as **${nickname}** with rank **${canonicalRank}**.`, ephemeral: true });
+  } catch (error) {
+    console.error('Nickname change failed:', error);
+    return interaction.reply({ content: `Records saved, but I could not change ${target}'s nickname (🌸 ${inGameUser}). Make sure the bot has the **Manage Nicknames** permission and that the target's highest role is below the bot's role.`, ephemeral: true });
+  }
+}
+
+async function handleSetVerifyPrefix(message, args) {
+  if (!isStaff(message.member)) return message.reply('This command is for staff only.');
+  const memberInput = args[1];
+  const inGameUser = args[2];
+  const rank = args.slice(3).join(' ').trim();
+  if (!memberInput || !inGameUser || !rank) {
+    return message.reply('Usage: `.setverify <member> <in-game-user> <rank>`\nExample: `.setverify @member Mihaitzuuu Celestial`');
+  }
+  const canonicalRank = RANKS.find((candidate) => candidate.toLowerCase() === rank.toLowerCase());
+  if (!canonicalRank) return message.reply(`Invalid rank. Choose one of: ${RANKS.join(', ')}.`);
+  const member = await resolveMember(message.guild, memberInput);
+  if (!member) {
+    return message.reply(`Could not find a member matching **${memberInput}**. Try mentioning them, using their username, or their user ID.`);
+  }
+  const target = member.user;
+  try {
+    const nickname = await applySetVerify(member, inGameUser, canonicalRank);
+    return message.reply(`${target} has been force-verified as **${nickname}** with rank **${canonicalRank}**.`);
+  } catch (error) {
+    console.error('Nickname change failed:', error);
+    return message.reply(`Records saved, but I could not change ${target}'s nickname (🌸 ${inGameUser}). Make sure the bot has the **Manage Nicknames** permission and that the target's highest role is below the bot's role.`);
+  }
+}
+
+// ─── Trust dashboards ───────────────────────────────────────────────────────
+// Keeps a single embed in each `<location>-users` channel up to date with the
+// list of members trusted there. data.trustDashboards[location] stores the
+// channel id + message id so edits replace the old message instead of spamming.
+async function updateTrustDashboard(guild, location) {
+  try {
+    const canonical = location.toLowerCase();
+    const channel = guild.channels.cache.find((c) => c.name.toLowerCase() === `${canonical}-users`);
+    if (!channel?.isTextBased()) return;
+
+    const trustedIds = Object.entries(data.users)
+      .filter(([, record]) => record.trustedLocations?.some((item) => item.toLowerCase() === canonical))
+      .map(([id]) => id);
+
+    const lines = trustedIds.length
+      ? trustedIds.map((id) => `<@${id}>`).join('\n')
+      : 'No trusted members yet.';
+
+    const embed = makeEmbed()
+      .setTitle(`${canonical} — Trusted Members`)
+      .setDescription(`**${trustedIds.length}** member(s) trusted:\n\n${lines.slice(0, 4000)}`)
+      .setTimestamp();
+
+    const saved = data.trustDashboards[canonical] || {};
+    if (saved.channelId === channel.id && saved.messageId) {
+      const msg = await channel.messages.fetch(saved.messageId).catch(() => null);
+      if (msg) {
+        await msg.edit({ embeds: [embed], files: logoFile() });
+        return;
+      }
+    }
+
+    const sent = await channel.send({ embeds: [embed], files: logoFile() });
+    data.trustDashboards[canonical] = { channelId: channel.id, messageId: sent.id };
+    saveData();
+  } catch (error) {
+    console.error(`Failed to update trust dashboard for ${location}:`, error);
+  }
+}
+
+async function rebuildAllTrustDashboards(guild) {
+  for (const location of TRUST_LOCATIONS) {
+    await updateTrustDashboard(guild, location);
+  }
+}
+
+module.exports = { commandDefinitions, handleVerification, handleVerificationPrefix, handleVerify, handleVerifyPrefix, handleSetVerify, handleSetVerifyPrefix, updateTrustDashboard, rebuildAllTrustDashboards };
