@@ -190,32 +190,6 @@ function tagMembers(g, name) {
     .all(g, name)
     .map((x) => x.user_id);
 }
-module.exports = {
-  db,
-  ensureGuild,
-  settings,
-  getPrefix,
-  updateSettings,
-  addWarning,
-  warnings,
-  setLeave,
-  getLeave,
-  listLeave,
-  isStaff,
-  upsertStaff,
-  removeStaff,
-  listStaff,
-  tag,
-  tagMembers,
-  ticket,
-  saveTicket,
-  assignTicket,
-  deleteTicket,
-  addStaffTag,
-  removeStaffTag,
-  userTags,
-};
-
 function ticket(g, c) {
   ensureGuild(g);
   return db
