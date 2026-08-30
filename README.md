@@ -10,7 +10,7 @@ Ticket channels are intended to be recognized only inside each guild's configure
 
 ## Setup
 
-Requires Node.js 22.5 or newer. Copy `.env.example` to `.env` and set `DISCORD_TOKEN` and `CLIENT_ID`. Use `DISCORD_GUILD_ID` only as an optional development shortcut for registering commands in one guild; leave it empty for global command registration when running on multiple servers. Run `npm install`, then `npm start`.
+Requires Node.js 22.5 or newer. Copy `.env.example` to `.env` and set `DISCORD_TOKEN`, `CLIENT_ID`, and optionally `OWNER_ID` (your Discord user ID for global bot owner bypass across settings and staff commands). Use `DISCORD_GUILD_ID` only as an optional development shortcut for registering commands in one guild; leave it empty for global command registration when running on multiple servers. Run `npm install`, then `npm start`.
 
 The database is SQLite at `DATABASE_URL` (default `data/mihulish.db`) and is created automatically. Never commit `.env` or the `data` directory.
 

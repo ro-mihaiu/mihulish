@@ -28,15 +28,29 @@ function embed(title, description, color = COLOR) {
     .setTitle(title)
     .setDescription(description);
 }
-function staffCheck(guildId, member) {
+function isBotOwner(userId, client = null) {
+  if (!userId) return false;
+  if (process.env.OWNER_ID && userId === process.env.OWNER_ID) return true;
+  if (process.env.BOT_OWNER_ID && userId === process.env.BOT_OWNER_ID) return true;
+  if (client?.application?.owner) {
+    const owner = client.application.owner;
+    if (owner.id === userId) return true;
+    if (owner.members && owner.members.has(userId)) return true;
+    if (owner.ownerId === userId) return true;
+  }
+  return false;
+}
+function staffCheck(guildId, member, client = null) {
   if (!member) return false;
+  if (isBotOwner(member.id, client || member.client)) return true;
   return (
     store.isStaff(guildId, member.id) ||
     member.permissions?.has(PermissionFlagsBits.Administrator)
   );
 }
-function managerCheck(guildId, member) {
+function managerCheck(guildId, member, client = null) {
   if (!member) return false;
+  if (isBotOwner(member.id, client || member.client)) return true;
   const s = store.settings(guildId);
   return (
     member.permissions?.has(PermissionFlagsBits.Administrator) ||
@@ -44,10 +58,10 @@ function managerCheck(guildId, member) {
   );
 }
 function staff(i) {
-  return staffCheck(i.guildId, i.member);
+  return isBotOwner(i.user?.id, i.client) || staffCheck(i.guildId, i.member, i.client);
 }
 function manager(i) {
-  return managerCheck(i.guildId, i.member);
+  return isBotOwner(i.user?.id, i.client) || managerCheck(i.guildId, i.member, i.client);
 }
 function deny(i, text = "You must be configured staff to use this command.") {
   return i.reply({ content: text, ephemeral: true });
@@ -389,7 +403,10 @@ add(
   "Moderation",
   "Moderate Members",
   async (i) => {
-    if (!i.memberPermissions.has(PermissionFlagsBits.ModerateMembers))
+    if (
+      !i.memberPermissions.has(PermissionFlagsBits.ModerateMembers) &&
+      !isBotOwner(i.user.id, i.client)
+    )
       return deny(i, "You need Moderate Members.");
     const u = target(i),
       r = i.options.getString("reason");
@@ -453,7 +470,10 @@ function moderation(name, perm, method, label) {
         ? "Kick Members"
         : "Ban Members",
     async (i) => {
-      if (!i.memberPermissions.has(perm))
+      if (
+        !i.memberPermissions.has(perm) &&
+        !isBotOwner(i.user.id, i.client)
+      )
         return deny(
           i,
           `You need ${name === "mute" ? "Moderate Members" : name === "kick" ? "Kick Members" : "Ban Members"}.`,
@@ -462,7 +482,10 @@ function moderation(name, perm, method, label) {
         r = i.options.getString("reason") || "No reason provided";
       if (m.id === i.guild.ownerId || m.id === i.client.user.id)
         return deny(i, "That member cannot be moderated.");
-      if (m.roles?.highest?.position >= i.member.roles.highest.position)
+      if (
+        !isBotOwner(i.user.id, i.client) &&
+        m.roles?.highest?.position >= i.member.roles.highest.position
+      )
         return deny(
           i,
           "You cannot moderate a member with an equal or higher role.",
@@ -509,12 +532,16 @@ const mute = new SlashCommandBuilder()
   )
   .addStringOption((o) => o.setName("reason").setDescription("Reason"));
 add(mute, "Moderation", "Moderate Members", async (i) => {
-  if (!i.memberPermissions.has(PermissionFlagsBits.ModerateMembers))
+  if (
+    !i.memberPermissions.has(PermissionFlagsBits.ModerateMembers) &&
+    !isBotOwner(i.user.id, i.client)
+  )
     return deny(i, "You need Moderate Members.");
   const m = target(i);
   if (
     m.id === i.guild.ownerId ||
-    m.roles.highest.position >= i.member.roles.highest.position
+    (!isBotOwner(i.user.id, i.client) &&
+      m.roles.highest.position >= i.member.roles.highest.position)
   )
     return deny(i, "You cannot mute that member.");
   await m.timeout(
@@ -528,7 +555,10 @@ const bans = new SlashCommandBuilder()
   .setDescription("List server bans")
   .setDefaultMemberPermissions(PermissionFlagsBits.BanMembers);
 add(bans, "Moderation", "Ban Members", async (i) => {
-  if (!i.memberPermissions.has(PermissionFlagsBits.BanMembers))
+  if (
+    !i.memberPermissions.has(PermissionFlagsBits.BanMembers) &&
+    !isBotOwner(i.user.id, i.client)
+  )
     return deny(i, "You need Ban Members.");
   const rows = await i.guild.bans.fetch();
   return i.reply({
@@ -770,7 +800,10 @@ const settingsCmd = new SlashCommandBuilder()
       .setMaxLength(5),
   );
 add(settingsCmd, "Utility", "Administrator", async (i) => {
-  if (!i.memberPermissions.has(PermissionFlagsBits.Administrator))
+  if (
+    !i.memberPermissions.has(PermissionFlagsBits.Administrator) &&
+    !isBotOwner(i.user.id, i.client)
+  )
     return deny(i, "Only server administrators can change settings.");
   const values = {};
   const muteRole = i.options.getRole("mute_role"),
@@ -825,5 +858,6 @@ module.exports = {
   setLeaveNickname,
   staffCheck,
   managerCheck,
+  isBotOwner,
   stamp,
 };

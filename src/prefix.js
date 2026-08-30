@@ -7,6 +7,7 @@ const {
   setLeaveNickname,
   staffCheck,
   managerCheck,
+  isBotOwner,
   stamp,
 } = require("./commands");
 
@@ -113,7 +114,10 @@ async function handlePrefixMessage(message) {
   }
 
   if (command.name === "settings") {
-    if (!message.member.permissions.has(PermissionFlagsBits.Administrator)) {
+    if (
+      !message.member.permissions.has(PermissionFlagsBits.Administrator) &&
+      !isBotOwner(message.author.id, message.client)
+    ) {
       return reply(message, "Only server administrators can change settings.");
     }
 
@@ -205,7 +209,10 @@ async function handlePrefixMessage(message) {
   }
 
   if (command.name === "warn") {
-    if (!message.member.permissions.has(PermissionFlagsBits.ModerateMembers)) {
+    if (
+      !message.member.permissions.has(PermissionFlagsBits.ModerateMembers) &&
+      !isBotOwner(message.author.id, message.client)
+    ) {
       return reply(message, "You need Moderate Members.");
     }
     const [userArg, ...reasonParts] = command.arguments;
@@ -227,7 +234,7 @@ async function handlePrefixMessage(message) {
   }
 
   if (command.name === "warns") {
-    if (!staffCheck(message.guild.id, message.member)) {
+    if (!staffCheck(message.guild.id, message.member, message.client)) {
       return reply(message, "You must be configured staff to use this command.");
     }
     const [userArg] = command.arguments;
@@ -249,7 +256,7 @@ async function handlePrefixMessage(message) {
   }
 
   if (command.name === "warnings") {
-    if (!staffCheck(message.guild.id, message.member)) {
+    if (!staffCheck(message.guild.id, message.member, message.client)) {
       return reply(message, "You must be configured staff to use this command.");
     }
     const rows = store.warnings(message.guild.id);
@@ -268,7 +275,10 @@ async function handlePrefixMessage(message) {
   }
 
   if (command.name === "mute") {
-    if (!message.member.permissions.has(PermissionFlagsBits.ModerateMembers)) {
+    if (
+      !message.member.permissions.has(PermissionFlagsBits.ModerateMembers) &&
+      !isBotOwner(message.author.id, message.client)
+    ) {
       return reply(message, "You need Moderate Members.");
     }
     const [userArg, minArg, ...reasonParts] = command.arguments;
@@ -283,8 +293,9 @@ async function handlePrefixMessage(message) {
     }
     if (
       targetMember.id === message.guild.ownerId ||
-      (message.guild.members.me && targetMember.roles.highest.position >= message.guild.members.me.roles.highest.position) ||
-      targetMember.roles.highest.position >= message.member.roles.highest.position
+      (!isBotOwner(message.author.id, message.client) &&
+        ((message.guild.members.me && targetMember.roles.highest.position >= message.guild.members.me.roles.highest.position) ||
+          targetMember.roles.highest.position >= message.member.roles.highest.position))
     ) {
       return reply(message, "You cannot mute that member.");
     }
@@ -300,7 +311,10 @@ async function handlePrefixMessage(message) {
   }
 
   if (command.name === "kick") {
-    if (!message.member.permissions.has(PermissionFlagsBits.KickMembers)) {
+    if (
+      !message.member.permissions.has(PermissionFlagsBits.KickMembers) &&
+      !isBotOwner(message.author.id, message.client)
+    ) {
       return reply(message, "You need Kick Members.");
     }
     const [userArg, ...reasonParts] = command.arguments;
@@ -316,8 +330,9 @@ async function handlePrefixMessage(message) {
       return reply(message, "That member cannot be moderated.");
     }
     if (
-      (message.guild.members.me && targetMember.roles.highest.position >= message.guild.members.me.roles.highest.position) ||
-      targetMember.roles.highest.position >= message.member.roles.highest.position
+      !isBotOwner(message.author.id, message.client) &&
+      ((message.guild.members.me && targetMember.roles.highest.position >= message.guild.members.me.roles.highest.position) ||
+        targetMember.roles.highest.position >= message.member.roles.highest.position)
     ) {
       return reply(message, "You cannot moderate a member with an equal or higher role.");
     }
@@ -330,7 +345,10 @@ async function handlePrefixMessage(message) {
   }
 
   if (command.name === "ban" || command.name === "softban") {
-    if (!message.member.permissions.has(PermissionFlagsBits.BanMembers)) {
+    if (
+      !message.member.permissions.has(PermissionFlagsBits.BanMembers) &&
+      !isBotOwner(message.author.id, message.client)
+    ) {
       return reply(message, "You need Ban Members.");
     }
     const [userArg, ...reasonParts] = command.arguments;
@@ -347,6 +365,7 @@ async function handlePrefixMessage(message) {
       return reply(message, "That member cannot be moderated.");
     }
     if (
+      !isBotOwner(message.author.id, message.client) &&
       targetMember &&
       ((message.guild.members.me && targetMember.roles.highest.position >= message.guild.members.me.roles.highest.position) ||
         targetMember.roles.highest.position >= message.member.roles.highest.position)
@@ -375,7 +394,10 @@ async function handlePrefixMessage(message) {
   }
 
   if (command.name === "bans") {
-    if (!message.member.permissions.has(PermissionFlagsBits.BanMembers)) {
+    if (
+      !message.member.permissions.has(PermissionFlagsBits.BanMembers) &&
+      !isBotOwner(message.author.id, message.client)
+    ) {
       return reply(message, "You need Ban Members.");
     }
     const rows = await message.guild.bans.fetch();
@@ -395,7 +417,7 @@ async function handlePrefixMessage(message) {
   }
 
   if (command.name === "loa") {
-    if (!staffCheck(message.guild.id, message.member)) {
+    if (!staffCheck(message.guild.id, message.member, message.client)) {
       return reply(message, "You must be configured staff to use this command.");
     }
     const [sub, ...args] = command.arguments;
@@ -480,7 +502,7 @@ async function handlePrefixMessage(message) {
   }
 
   if (command.name === "sloa") {
-    if (!staffCheck(message.guild.id, message.member)) {
+    if (!staffCheck(message.guild.id, message.member, message.client)) {
       return reply(message, "You must be configured staff to use this command.");
     }
     const [sub, ...args] = command.arguments;
@@ -571,7 +593,7 @@ async function handlePrefixMessage(message) {
   }
 
   if (command.name === "staff") {
-    if (!managerCheck(message.guild.id, message.member)) {
+    if (!managerCheck(message.guild.id, message.member, message.client)) {
       return reply(message, "Only managers can manage staff.");
     }
     const [sub, userArg, roleArg] = command.arguments;
@@ -609,11 +631,11 @@ async function handlePrefixMessage(message) {
   }
 
   if (command.name === "tag") {
-    if (!staffCheck(message.guild.id, message.member)) {
+    if (!staffCheck(message.guild.id, message.member, message.client)) {
       return reply(message, "You must be configured staff to use this command.");
     }
     const [sub, tagArg, userArg] = command.arguments;
-    const isMgr = managerCheck(message.guild.id, message.member);
+    const isMgr = managerCheck(message.guild.id, message.member, message.client);
     if (["create", "delete", "ping"].includes(sub) && !isMgr) {
       return reply(message, "Only managers can manage available tags or ping tags.");
     }
@@ -682,7 +704,7 @@ async function handlePrefixMessage(message) {
   }
 
   if (command.name === "claim") {
-    if (!staffCheck(message.guild.id, message.member)) {
+    if (!staffCheck(message.guild.id, message.member, message.client)) {
       return reply(message, "You must be configured staff to use this command.");
     }
     const t = store.ticket(message.guild.id, message.channel.id);
@@ -697,7 +719,7 @@ async function handlePrefixMessage(message) {
   }
 
   if (command.name === "transfer") {
-    if (!staffCheck(message.guild.id, message.member)) {
+    if (!staffCheck(message.guild.id, message.member, message.client)) {
       return reply(message, "You must be configured staff to use this command.");
     }
     const [userArg] = command.arguments;
@@ -709,7 +731,7 @@ async function handlePrefixMessage(message) {
     if (!t || t.status !== "OPEN" || !t.ticket_user_id) {
       return reply(message, "This is not a recognized open ticket.");
     }
-    if (!store.isStaff(message.guild.id, targetUser.id)) {
+    if (!store.isStaff(message.guild.id, targetUser.id) && !isBotOwner(targetUser.id, message.client)) {
       return reply(message, "The recipient must be registered staff.");
     }
     store.assignTicket(message.guild.id, message.channel.id, targetUser.id);
@@ -720,14 +742,14 @@ async function handlePrefixMessage(message) {
   }
 
   if (command.name === "unclaim") {
-    if (!staffCheck(message.guild.id, message.member)) {
+    if (!staffCheck(message.guild.id, message.member, message.client)) {
       return reply(message, "You must be configured staff to use this command.");
     }
     const t = store.ticket(message.guild.id, message.channel.id);
     if (!t || !t.assigned_staff_id) {
       return reply(message, "This ticket is not claimed.");
     }
-    const isMgr = managerCheck(message.guild.id, message.member);
+    const isMgr = managerCheck(message.guild.id, message.member, message.client);
     if (t.assigned_staff_id !== message.author.id && !isMgr) {
       return reply(
         message,

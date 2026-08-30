@@ -37,6 +37,7 @@ async function register() {
 }
 client.once(Events.ClientReady, async (c) => {
   console.log(`[mihulish] ready as ${c.user.tag}`);
+  await c.application?.fetch().catch(() => {});
   for (const g of c.guilds.cache.values()) store.ensureGuild(g.id);
   if (process.env.CLIENT_ID)
     await register().catch((e) =>
