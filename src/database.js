@@ -40,6 +40,7 @@ CREATE TABLE IF NOT EXISTS ticket_panels (guild_id TEXT NOT NULL, panel TEXT NOT
 CREATE TABLE IF NOT EXISTS tickets (id INTEGER PRIMARY KEY AUTOINCREMENT, guild_id TEXT NOT NULL, channel_id TEXT NOT NULL, panel TEXT NOT NULL, ticket_user_id TEXT, status TEXT NOT NULL, created_at INTEGER NOT NULL, closed_at INTEGER, assigned_staff_id TEXT, UNIQUE(guild_id,channel_id));
 CREATE TABLE IF NOT EXISTS sticky_messages (id INTEGER PRIMARY KEY AUTOINCREMENT, guild_id TEXT NOT NULL, channel_id TEXT NOT NULL, message_id TEXT, content TEXT NOT NULL, updated_at INTEGER NOT NULL, UNIQUE(guild_id,channel_id));
 CREATE TABLE IF NOT EXISTS moderation_logs (id INTEGER PRIMARY KEY AUTOINCREMENT, guild_id TEXT NOT NULL, action TEXT NOT NULL, target_id TEXT, moderator_id TEXT, reason TEXT, created_at INTEGER NOT NULL);
+CREATE TABLE IF NOT EXISTS original_nicknames (guild_id TEXT NOT NULL, user_id TEXT NOT NULL, nickname TEXT, PRIMARY KEY (guild_id, user_id));
 `);
 
 const DEFAULT_TICKET_PANELS = ["java", "br", "bug", "report", "partnership"];
@@ -223,6 +224,20 @@ function removeStaffTag(g, name, u) {
     "DELETE FROM staff_tags WHERE guild_id=? AND tag_id=(SELECT id FROM tags WHERE guild_id=? AND name=?) AND user_id=?",
   ).run(g, g, name, u);
 }
+function saveOriginalNickname(g, u, nickname) {
+  db.prepare(
+    "INSERT OR REPLACE INTO original_nicknames(guild_id,user_id,nickname) VALUES(?,?,?)",
+  ).run(g, u, nickname);
+}
+function getOriginalNickname(g, u) {
+  const row = db
+    .prepare("SELECT nickname FROM original_nicknames WHERE guild_id=? AND user_id=?")
+    .get(g, u);
+  return row?.nickname || null;
+}
+function deleteOriginalNickname(g, u) {
+  db.prepare("DELETE FROM original_nicknames WHERE guild_id=? AND user_id=?").run(g, u);
+}
 function userTags(g, u) {
   return db
     .prepare(
@@ -254,4 +269,7 @@ module.exports = {
   addStaffTag,
   removeStaffTag,
   userTags,
+  saveOriginalNickname,
+  getOriginalNickname,
+  deleteOriginalNickname,
 };

@@ -50,6 +50,48 @@ function target(i, name = "user") {
 function stamp(t) {
   return `<t:${Math.floor(t / 1000)}:f>`;
 }
+async function setLeaveNickname(i, type, active) {
+  const member = i.member;
+  if (!member) return null;
+  const prefix = type === "loa" ? "LOA" : "SLOA";
+  if (active) {
+    try {
+      if (member.id === i.guild.ownerId) {
+        return "Cannot rename the server owner.";
+      }
+      if (
+        member.roles.highest.position >= i.guild.members.me.roles.highest.position
+      ) {
+        return "Cannot rename a member with an equal or higher role than the bot.";
+      }
+      const originalNick = member.nickname || member.user.username;
+      store.saveOriginalNickname(i.guildId, member.id, originalNick);
+      await member.setNickname(`${prefix} | ${member.user.username}`);
+      return null;
+    } catch (e) {
+      if (e.code === 50013) {
+        return "Missing permission to rename members. Ensure the bot has Manage Nicknames permission.";
+      }
+      return `Failed to rename: ${e.message}`;
+    }
+  } else {
+    try {
+      const originalNick = store.getOriginalNickname(i.guildId, member.id);
+      store.deleteOriginalNickname(i.guildId, member.id);
+      if (originalNick) {
+        await member.setNickname(originalNick);
+      } else {
+        await member.setNickname(null);
+      }
+      return null;
+    } catch (e) {
+      if (e.code === 50013) {
+        return "Missing permission to rename members. Ensure the bot has Manage Nicknames permission.";
+      }
+      return `Failed to restore nickname: ${e.message}`;
+    }
+  }
+}
 
 add(
   new SlashCommandBuilder()
@@ -150,8 +192,12 @@ add(loa, "LOA", "Staff", async (i) => {
       null,
       d ? Date.now() + d * 86400000 : null,
     );
+    const nickError = await setLeaveNickname(i, "loa", a);
+    const embedText = nickError
+      ? `${i.user} — ${r}\n⚠️ ${nickError}`
+      : `${i.user} — ${r}`;
     return i.reply({
-      embeds: [embed(a ? "LOA active" : "LOA removed", `${i.user} — ${r}`)],
+      embeds: [embed(a ? "LOA active" : "LOA removed", embedText)],
     });
   }
   let rows =
@@ -238,11 +284,15 @@ add(sloa, "SLOA", "Staff", async (i) => {
       i.options.getString("availability"),
       d ? Date.now() + d * 86400000 : null,
     );
+    const nickError = await setLeaveNickname(i, "sloa", a);
+    const embedText = nickError
+      ? `${i.user} — ${i.options.getString("availability")}\n⚠️ ${nickError}`
+      : `${i.user} — ${i.options.getString("availability")}`;
     return i.reply({
       embeds: [
         embed(
           a ? "SLOA active" : "SLOA removed",
-          `${i.user} — ${i.options.getString("availability")}`,
+          embedText,
         ),
       ],
     });
