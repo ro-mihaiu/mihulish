@@ -233,6 +233,38 @@ async function handlePrefixMessage(message) {
     });
   }
 
+  if (command.name === "unwarn") {
+    if (
+      !message.member.permissions.has(PermissionFlagsBits.ModerateMembers) &&
+      !isBotOwner(message.author.id, message.client)
+    ) {
+      return reply(message, "You need Moderate Members.");
+    }
+    const [userArg, idArg] = command.arguments;
+    const id = parseInt(idArg, 10);
+    const targetMember = await resolveMember(message.guild, userArg);
+    const targetUser = targetMember ? targetMember.user : await resolveUser(message.client, message.guild, userArg);
+    if (!targetUser || isNaN(id) || id < 1) {
+      return reply(message, `Usage: \`${p}unwarn <@user|id> <warn-id>\``);
+    }
+    const w = store.getWarning(message.guild.id, id);
+    if (!w) {
+      return reply(message, `Warning #${id} was not found.`);
+    }
+    if (w.user_id !== targetUser.id) {
+      return reply(message, `Warning #${id} does not belong to <@${targetUser.id}>.`);
+    }
+    store.deleteWarning(message.guild.id, id);
+    return reply(message, {
+      embeds: [
+        embed(
+          "Warning removed",
+          `Warning **#${id}** for <@${targetUser.id}> was removed.\nReason was: ${w.reason}`,
+        ),
+      ],
+    });
+  }
+
   if (command.name === "warns") {
     if (!staffCheck(message.guild.id, message.member, message.client)) {
       return reply(message, "You must be configured staff to use this command.");
@@ -305,6 +337,42 @@ async function handlePrefixMessage(message) {
         embed(
           "Mute complete",
           `<@${targetMember.id}> was timed out for ${minutes} minute(s).\nReason: ${reason}`,
+        ),
+      ],
+    });
+  }
+
+  if (command.name === "unmute") {
+    if (
+      !message.member.permissions.has(PermissionFlagsBits.ModerateMembers) &&
+      !isBotOwner(message.author.id, message.client)
+    ) {
+      return reply(message, "You need Moderate Members.");
+    }
+    const [userArg, ...reasonParts] = command.arguments;
+    const targetMember = await resolveMember(message.guild, userArg);
+    const reason = reasonParts.join(" ").trim() || "No reason provided";
+    if (!targetMember) {
+      return reply(message, `Usage: \`${p}unmute <@user|id> [reason]\``);
+    }
+    if (
+      targetMember.id === message.guild.ownerId ||
+      (!isBotOwner(message.author.id, message.client) &&
+        ((message.guild.members.me && targetMember.roles.highest.position >= message.guild.members.me.roles.highest.position) ||
+          targetMember.roles.highest.position >= message.member.roles.highest.position))
+    ) {
+      return reply(message, "You cannot moderate a member with an equal or higher role.");
+    }
+    const s = store.settings(message.guild.id);
+    if (s.mute_role_id && targetMember.roles?.cache?.has(s.mute_role_id)) {
+      await targetMember.roles.remove(s.mute_role_id).catch(() => {});
+    }
+    await targetMember.timeout(null, reason);
+    return reply(message, {
+      embeds: [
+        embed(
+          "Unmute complete",
+          `<@${targetMember.id}> was unmuted.\nReason: ${reason}`,
         ),
       ],
     });
@@ -391,6 +459,37 @@ async function handlePrefixMessage(message) {
         ],
       });
     }
+  }
+
+  if (command.name === "unban") {
+    if (
+      !message.member.permissions.has(PermissionFlagsBits.BanMembers) &&
+      !isBotOwner(message.author.id, message.client)
+    ) {
+      return reply(message, "You need Ban Members.");
+    }
+    const [userArg, ...reasonParts] = command.arguments;
+    const targetUser = await resolveUser(message.client, message.guild, userArg);
+    const reason = reasonParts.join(" ").trim() || "No reason provided";
+    if (!targetUser) {
+      return reply(message, `Usage: \`${p}unban <@user|id> [reason]\``);
+    }
+    try {
+      await message.guild.members.unban(targetUser.id, reason);
+    } catch (e) {
+      if (e.code === 10026) {
+        return reply(message, "That user is not banned.");
+      }
+      return reply(message, `Failed to unban user: ${e.message}`);
+    }
+    return reply(message, {
+      embeds: [
+        embed(
+          "Unban complete",
+          `<@${targetUser.id}> was unbanned.\nReason: ${reason}`,
+        ),
+      ],
+    });
   }
 
   if (command.name === "bans") {

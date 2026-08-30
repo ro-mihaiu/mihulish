@@ -103,6 +103,19 @@ function addWarning(g, u, m, r) {
     .prepare("SELECT * FROM warnings WHERE id=?")
     .get(Number(x.lastInsertRowid));
 }
+function getWarning(g, id) {
+  ensureGuild(g);
+  return db
+    .prepare("SELECT * FROM warnings WHERE guild_id=? AND id=?")
+    .get(g, id);
+}
+function deleteWarning(g, id) {
+  ensureGuild(g);
+  return (
+    db.prepare("DELETE FROM warnings WHERE guild_id=? AND id=?").run(g, id)
+      .changes > 0
+  );
+}
 function warnings(g, u = null, m = null) {
   let q = "SELECT * FROM warnings WHERE guild_id=?",
     a = [g];
@@ -252,6 +265,8 @@ module.exports = {
   getPrefix,
   updateSettings,
   addWarning,
+  getWarning,
+  deleteWarning,
   warnings,
   setLeave,
   getLeave,

@@ -130,11 +130,14 @@ function buildHelpEmbed(prefix = "m.") {
       name: "🛡️ Moderation",
       cmds: [
         { name: "warn", desc: "Warn a member with a reason" },
+        { name: "unwarn", desc: "Remove a warning from a member" },
         { name: "warns", desc: "View warning history for a member" },
         { name: "warnings", desc: "View recent server-wide warnings" },
         { name: "mute", desc: "Timeout a member for specified minutes" },
+        { name: "unmute", desc: "Remove timeout from a member" },
         { name: "kick", desc: "Kick a member from the server" },
         { name: "ban", desc: "Ban a member from the server" },
+        { name: "unban", desc: "Unban a user from the server" },
         { name: "softban", desc: "Softban a member (ban and prune messages)" },
         { name: "bans", desc: "List active server bans" },
       ],
@@ -421,6 +424,46 @@ add(
     });
   },
 );
+add(
+  new SlashCommandBuilder()
+    .setName("unwarn")
+    .setDescription("Remove a warning from a member")
+    .setDefaultMemberPermissions(PermissionFlagsBits.ModerateMembers)
+    .addUserOption((o) =>
+      o.setName("user").setDescription("Member").setRequired(true),
+    )
+    .addIntegerOption((o) =>
+      o
+        .setName("id")
+        .setDescription("Warning ID")
+        .setRequired(true)
+        .setMinValue(1),
+    ),
+  "Moderation",
+  "Moderate Members",
+  async (i) => {
+    if (
+      !i.memberPermissions.has(PermissionFlagsBits.ModerateMembers) &&
+      !isBotOwner(i.user.id, i.client)
+    )
+      return deny(i, "You need Moderate Members.");
+    const u = target(i),
+      id = i.options.getInteger("id");
+    const w = store.getWarning(i.guildId, id);
+    if (!w) return deny(i, `Warning #${id} was not found.`);
+    if (w.user_id !== u.id)
+      return deny(i, `Warning #${id} does not belong to ${u}.`);
+    store.deleteWarning(i.guildId, id);
+    return i.reply({
+      embeds: [
+        embed(
+          "Warning removed",
+          `Warning **#${id}** for ${u} was removed.\nReason was: ${w.reason}`,
+        ),
+      ],
+    });
+  },
+);
 for (const [name, desc] of [
   ["warns", "View a member warnings"],
   ["warnings", "View server warnings"],
@@ -549,6 +592,69 @@ add(mute, "Moderation", "Moderate Members", async (i) => {
     i.options.getString("reason") || "No reason provided",
   );
   return i.reply({ embeds: [embed("Mute complete", `${m} was timed out.`)] });
+});
+const unmute = new SlashCommandBuilder()
+  .setName("unmute")
+  .setDescription("Remove timeout from a member")
+  .setDefaultMemberPermissions(PermissionFlagsBits.ModerateMembers)
+  .addUserOption((o) =>
+    o.setName("user").setDescription("Member").setRequired(true),
+  )
+  .addStringOption((o) => o.setName("reason").setDescription("Reason"));
+add(unmute, "Moderation", "Moderate Members", async (i) => {
+  if (
+    !i.memberPermissions.has(PermissionFlagsBits.ModerateMembers) &&
+    !isBotOwner(i.user.id, i.client)
+  )
+    return deny(i, "You need Moderate Members.");
+  const m = target(i);
+  if (!m || !m.timeout)
+    return deny(i, "That member is not in the server.");
+  if (
+    m.id === i.guild.ownerId ||
+    (!isBotOwner(i.user.id, i.client) &&
+      m.roles?.highest?.position >= i.member.roles.highest.position)
+  )
+    return deny(i, "You cannot moderate a member with an equal or higher role.");
+  const r = i.options.getString("reason") || "No reason provided";
+  const s = store.settings(i.guildId);
+  if (s.mute_role_id && m.roles?.cache?.has(s.mute_role_id)) {
+    await m.roles.remove(s.mute_role_id).catch(() => {});
+  }
+  await m.timeout(null, r);
+  return i.reply({
+    embeds: [embed("Unmute complete", `${m} was unmuted.\nReason: ${r}`)],
+  });
+});
+const unban = new SlashCommandBuilder()
+  .setName("unban")
+  .setDescription("Unban a user from the server")
+  .setDefaultMemberPermissions(PermissionFlagsBits.BanMembers)
+  .addUserOption((o) =>
+    o.setName("user").setDescription("User to unban").setRequired(true),
+  )
+  .addStringOption((o) => o.setName("reason").setDescription("Reason"));
+add(unban, "Moderation", "Ban Members", async (i) => {
+  if (
+    !i.memberPermissions.has(PermissionFlagsBits.BanMembers) &&
+    !isBotOwner(i.user.id, i.client)
+  )
+    return deny(i, "You need Ban Members.");
+  const u = i.options.getUser("user");
+  const r = i.options.getString("reason") || "No reason provided";
+  try {
+    await i.guild.members.unban(u.id, r);
+  } catch (e) {
+    if (e.code === 10026) {
+      return deny(i, "That user is not banned.");
+    }
+    return deny(i, `Failed to unban user: ${e.message}`);
+  }
+  return i.reply({
+    embeds: [
+      embed("Unban complete", `<@${u.id}> was unbanned.\nReason: ${r}`),
+    ],
+  });
 });
 const bans = new SlashCommandBuilder()
   .setName("bans")
