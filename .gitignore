@@ -1,0 +1,6 @@
+.env
+data/*.db
+data/*.db-*
+node_modules/
+w.md
+discord-dev.md

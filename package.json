@@ -1,0 +1,19 @@
+{
+  "name": "mihulish",
+  "version": "2.0.0",
+  "description": "Mihulish, a multi-guild Discord utility and staff bot",
+  "main": "src/index.js",
+  "type": "commonjs",
+  "engines": {
+    "node": ">=22.5"
+  },
+  "scripts": {
+    "start": "node src/index.js",
+    "check": "node --check src/index.js && node --check src/database.js && node --check src/commands.js",
+    "db-check": "node scripts/db-check.js"
+  },
+  "dependencies": {
+    "discord.js": "^14.27.0",
+    "dotenv": "^17.4.2"
+  }
+}

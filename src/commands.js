@@ -1,0 +1,715 @@
+const {
+  SlashCommandBuilder,
+  PermissionFlagsBits,
+  EmbedBuilder,
+  ActionRowBuilder,
+  ButtonBuilder,
+  ButtonStyle,
+} = require("discord.js");
+const store = require("./database");
+const COLOR = 0xe91e63;
+const DOCS = "https://mihulish.ro-mihaiu.xyz";
+const metadata = [];
+const commands = [];
+function add(builder, category, permission, execute) {
+  const data = builder.toJSON();
+  metadata.push({
+    name: data.name,
+    description: data.description,
+    category,
+    permission,
+    usage: `/${data.name}`,
+  });
+  commands.push({ data: builder, execute });
+}
+function embed(title, description, color = COLOR) {
+  return new EmbedBuilder()
+    .setColor(color)
+    .setTitle(title)
+    .setDescription(description);
+}
+function staff(i) {
+  return (
+    store.isStaff(i.guildId, i.user.id) ||
+    i.memberPermissions.has(PermissionFlagsBits.Administrator)
+  );
+}
+function manager(i) {
+  const s = store.settings(i.guildId);
+  return (
+    i.memberPermissions.has(PermissionFlagsBits.Administrator) ||
+    (s.manager_role_id && i.member.roles.cache.has(s.manager_role_id))
+  );
+}
+function deny(i, text = "You must be configured staff to use this command.") {
+  return i.reply({ content: text, ephemeral: true });
+}
+function target(i, name = "user") {
+  return i.options.getMember(name) || i.options.getUser(name);
+}
+function stamp(t) {
+  return `<t:${Math.floor(t / 1000)}:f>`;
+}
+
+add(
+  new SlashCommandBuilder()
+    .setName("help")
+    .setDescription("Learn about Mihulish"),
+  "Utility",
+  "Everyone",
+  (i) =>
+    i.reply({
+      embeds: [
+        embed(
+          "Mihulish",
+          "A dark, terminal-inspired Discord utility bot for moderation, staff management, tickets, and LOA/SLOA.\n\nRead the official documentation for setup and usage.",
+        ),
+      ],
+      components: [
+        new ActionRowBuilder().addComponents(
+          new ButtonBuilder()
+            .setLabel("Documentation")
+            .setStyle(ButtonStyle.Link)
+            .setURL(DOCS),
+        ),
+      ],
+    }),
+);
+add(
+  new SlashCommandBuilder()
+    .setName("commands")
+    .setDescription("Browse all Mihulish commands"),
+  "Utility",
+  "Everyone",
+  (i) => {
+    const text = metadata
+      .map(
+        (x) => `**/${x.name}** — ${x.description}\nPermission: ${x.permission}`,
+      )
+      .join("\n\n");
+    return i.reply({
+      embeds: [embed("Mihulish Commands", text.slice(0, 4096))],
+      ephemeral: true,
+    });
+  },
+);
+const loa = new SlashCommandBuilder()
+  .setName("loa")
+  .setDescription("Manage leave of absence")
+  .addSubcommand((s) => s.setName("rules").setDescription("Show LOA rules"))
+  .addSubcommand((s) =>
+    s
+      .setName("status")
+      .setDescription("Set your LOA status")
+      .addBooleanOption((o) =>
+        o
+          .setName("active")
+          .setDescription("Whether you are available")
+          .setRequired(true),
+      )
+      .addStringOption((o) =>
+        o
+          .setName("reason")
+          .setDescription("Reason")
+          .setRequired(true)
+          .setMaxLength(500),
+      )
+      .addIntegerOption((o) =>
+        o.setName("ends_in_days").setDescription("Optional duration in days"),
+      ),
+  )
+  .addSubcommand((s) =>
+    s
+      .setName("check")
+      .setDescription("Check LOA")
+      .addUserOption((o) => o.setName("user").setDescription("Staff member")),
+  )
+  .addSubcommand((s) => s.setName("list").setDescription("List active LOA"));
+add(loa, "LOA", "Staff", async (i) => {
+  if (!staff(i)) return deny(i);
+  const s = i.options.getSubcommand();
+  if (s === "rules")
+    return i.reply({
+      embeds: [
+        embed(
+          "LOA rules",
+          "Use LOA when fully unavailable. Give a clear reason and an optional end date. Return to active status when available again.",
+        ),
+      ],
+    });
+  if (s === "status") {
+    const a = i.options.getBoolean("active"),
+      r = i.options.getString("reason"),
+      d = i.options.getInteger("ends_in_days");
+    store.setLeave(
+      "loa",
+      i.guildId,
+      i.user.id,
+      a,
+      r,
+      null,
+      d ? Date.now() + d * 86400000 : null,
+    );
+    return i.reply({
+      embeds: [embed(a ? "LOA active" : "LOA removed", `${i.user} — ${r}`)],
+    });
+  }
+  let rows =
+    s === "list"
+      ? store.listLeave("loa", i.guildId)
+      : [
+          store.getLeave(
+            "loa",
+            i.guildId,
+            (i.options.getUser("user") || i.user).id,
+          ),
+        ].filter(Boolean);
+  return i.reply({
+    embeds: [
+      embed(
+        "LOA status",
+        rows.length
+          ? rows
+              .map(
+                (x) =>
+                  `<@${x.user_id}> — ${x.reason} · since ${stamp(x.started_at)}${x.ends_at ? ` · ends ${stamp(x.ends_at)}` : ""}`,
+              )
+              .join("\n")
+          : "No active LOA records.",
+      ),
+    ],
+  });
+});
+const sloa = new SlashCommandBuilder()
+  .setName("sloa")
+  .setDescription("Manage semi leave of absence")
+  .addSubcommand((s) => s.setName("rules").setDescription("Show SLOA rules"))
+  .addSubcommand((s) =>
+    s
+      .setName("status")
+      .setDescription("Set your SLOA status")
+      .addBooleanOption((o) =>
+        o
+          .setName("active")
+          .setDescription("Whether SLOA is active")
+          .setRequired(true),
+      )
+      .addStringOption((o) =>
+        o.setName("reason").setDescription("Reason").setRequired(true),
+      )
+      .addStringOption((o) =>
+        o
+          .setName("availability")
+          .setDescription("When you are available")
+          .setRequired(true),
+      )
+      .addIntegerOption((o) =>
+        o.setName("ends_in_days").setDescription("Optional duration in days"),
+      ),
+  )
+  .addSubcommand((s) =>
+    s
+      .setName("check")
+      .setDescription("Check SLOA")
+      .addUserOption((o) => o.setName("user").setDescription("Staff member")),
+  )
+  .addSubcommand((s) => s.setName("list").setDescription("List active SLOA"));
+add(sloa, "SLOA", "Staff", async (i) => {
+  if (!staff(i)) return deny(i);
+  const s = i.options.getSubcommand();
+  if (s === "rules")
+    return i.reply({
+      embeds: [
+        embed(
+          "SLOA rules",
+          "Use SLOA when partially available. Describe your availability clearly and keep it updated.",
+        ),
+      ],
+    });
+  if (s === "status") {
+    const a = i.options.getBoolean("active"),
+      d = i.options.getInteger("ends_in_days");
+    store.setLeave(
+      "sloa",
+      i.guildId,
+      i.user.id,
+      a,
+      i.options.getString("reason"),
+      i.options.getString("availability"),
+      d ? Date.now() + d * 86400000 : null,
+    );
+    return i.reply({
+      embeds: [
+        embed(
+          a ? "SLOA active" : "SLOA removed",
+          `${i.user} — ${i.options.getString("availability")}`,
+        ),
+      ],
+    });
+  }
+  const rows =
+    s === "list"
+      ? store.listLeave("sloa", i.guildId)
+      : [
+          store.getLeave(
+            "sloa",
+            i.guildId,
+            (i.options.getUser("user") || i.user).id,
+          ),
+        ].filter(Boolean);
+  return i.reply({
+    embeds: [
+      embed(
+        "SLOA status",
+        rows.length
+          ? rows
+              .map((x) => `<@${x.user_id}> — ${x.reason} · ${x.availability}`)
+              .join("\n")
+          : "No active SLOA records.",
+      ),
+    ],
+  });
+});
+
+add(
+  new SlashCommandBuilder()
+    .setName("warn")
+    .setDescription("Warn a member")
+    .setDefaultMemberPermissions(PermissionFlagsBits.ModerateMembers)
+    .addUserOption((o) =>
+      o.setName("user").setDescription("Member").setRequired(true),
+    )
+    .addStringOption((o) =>
+      o
+        .setName("reason")
+        .setDescription("Reason")
+        .setRequired(true)
+        .setMaxLength(1000),
+    ),
+  "Moderation",
+  "Moderate Members",
+  async (i) => {
+    if (!i.memberPermissions.has(PermissionFlagsBits.ModerateMembers))
+      return deny(i, "You need Moderate Members.");
+    const u = target(i),
+      r = i.options.getString("reason");
+    const w = store.addWarning(i.guildId, u.id, i.user.id, r);
+    return i.reply({
+      embeds: [
+        embed(
+          "Warning issued",
+          `${u} received warning **#${w.id}**.\nReason: ${r}`,
+        ),
+      ],
+    });
+  },
+);
+for (const [name, desc] of [
+  ["warns", "View a member warnings"],
+  ["warnings", "View server warnings"],
+]) {
+  const b = new SlashCommandBuilder()
+    .setName(name)
+    .setDescription(desc)
+    .addUserOption((o) => o.setName("user").setDescription("Optional member"));
+  add(b, "Moderation", "Staff", async (i) => {
+    if (!staff(i)) return deny(i);
+    const rows = store.warnings(
+      i.guildId,
+      name === "warns" ? (i.options.getUser("user") || i.user).id : null,
+    );
+    const text = rows.length
+      ? rows
+          .slice(0, 15)
+          .map(
+            (w) =>
+              `**#${w.id}** <@${w.user_id}> — ${w.reason}\nBy <@${w.moderator_id}> · ${stamp(w.created_at)}`,
+          )
+          .join("\n\n")
+      : "No warnings found.";
+    return i.reply({
+      embeds: [
+        embed(name === "warns" ? "Member warnings" : "Server warnings", text),
+      ],
+      ephemeral: name === "warns",
+    });
+  });
+}
+function moderation(name, perm, method, label) {
+  const b = new SlashCommandBuilder()
+    .setName(name)
+    .setDescription(label)
+    .setDefaultMemberPermissions(perm)
+    .addUserOption((o) =>
+      o.setName("user").setDescription("Member").setRequired(true),
+    )
+    .addStringOption((o) => o.setName("reason").setDescription("Reason"));
+  add(
+    b,
+    "Moderation",
+    name === "mute"
+      ? "Moderate Members"
+      : name === "kick"
+        ? "Kick Members"
+        : "Ban Members",
+    async (i) => {
+      if (!i.memberPermissions.has(perm))
+        return deny(
+          i,
+          `You need ${name === "mute" ? "Moderate Members" : name === "kick" ? "Kick Members" : "Ban Members"}.`,
+        );
+      const m = target(i),
+        r = i.options.getString("reason") || "No reason provided";
+      if (m.id === i.guild.ownerId || m.id === i.client.user.id)
+        return deny(i, "That member cannot be moderated.");
+      if (m.roles?.highest?.position >= i.member.roles.highest.position)
+        return deny(
+          i,
+          "You cannot moderate a member with an equal or higher role.",
+        );
+      if (!m[method])
+        return deny(
+          i,
+          "That moderation action is unavailable for this target.",
+        );
+      await m[method](r);
+      return i.reply({
+        embeds: [
+          embed(
+            `${name[0].toUpperCase() + name.slice(1)} complete`,
+            `${m} was ${name}d.\nReason: ${r}`,
+          ),
+        ],
+      });
+    },
+  );
+}
+moderation("kick", PermissionFlagsBits.KickMembers, "kick", "Kick a member");
+moderation("ban", PermissionFlagsBits.BanMembers, "ban", "Ban a member");
+moderation(
+  "softban",
+  PermissionFlagsBits.BanMembers,
+  "ban",
+  "Softban a member",
+);
+const mute = new SlashCommandBuilder()
+  .setName("mute")
+  .setDescription("Timeout a member")
+  .setDefaultMemberPermissions(PermissionFlagsBits.ModerateMembers)
+  .addUserOption((o) =>
+    o.setName("user").setDescription("Member").setRequired(true),
+  )
+  .addIntegerOption((o) =>
+    o
+      .setName("minutes")
+      .setDescription("Timeout minutes, maximum 40320")
+      .setRequired(true)
+      .setMinValue(1)
+      .setMaxValue(40320),
+  )
+  .addStringOption((o) => o.setName("reason").setDescription("Reason"));
+add(mute, "Moderation", "Moderate Members", async (i) => {
+  if (!i.memberPermissions.has(PermissionFlagsBits.ModerateMembers))
+    return deny(i, "You need Moderate Members.");
+  const m = target(i);
+  if (
+    m.id === i.guild.ownerId ||
+    m.roles.highest.position >= i.member.roles.highest.position
+  )
+    return deny(i, "You cannot mute that member.");
+  await m.timeout(
+    i.options.getInteger("minutes") * 60000,
+    i.options.getString("reason") || "No reason provided",
+  );
+  return i.reply({ embeds: [embed("Mute complete", `${m} was timed out.`)] });
+});
+const bans = new SlashCommandBuilder()
+  .setName("bans")
+  .setDescription("List server bans")
+  .setDefaultMemberPermissions(PermissionFlagsBits.BanMembers);
+add(bans, "Moderation", "Ban Members", async (i) => {
+  if (!i.memberPermissions.has(PermissionFlagsBits.BanMembers))
+    return deny(i, "You need Ban Members.");
+  const rows = await i.guild.bans.fetch();
+  return i.reply({
+    embeds: [
+      embed(
+        "Server bans",
+        rows.size
+          ? [...rows.values()]
+              .slice(0, 20)
+              .map((x) => `<@${x.user.id}> — ${x.reason || "No reason"}`)
+              .join("\n")
+          : "No bans found.",
+      ),
+    ],
+  });
+});
+
+const staffCmd = new SlashCommandBuilder()
+  .setName("staff")
+  .setDescription("Manage staff")
+  .addSubcommand((s) =>
+    s
+      .setName("add")
+      .setDescription("Add staff")
+      .addUserOption((o) =>
+        o.setName("user").setDescription("User").setRequired(true),
+      )
+      .addRoleOption((o) => o.setName("role").setDescription("Staff role")),
+  )
+  .addSubcommand((s) =>
+    s
+      .setName("remove")
+      .setDescription("Remove staff")
+      .addUserOption((o) =>
+        o.setName("user").setDescription("User").setRequired(true),
+      ),
+  )
+  .addSubcommand((s) =>
+    s
+      .setName("upgrade")
+      .setDescription("Change staff role")
+      .addUserOption((o) =>
+        o.setName("user").setDescription("User").setRequired(true),
+      )
+      .addRoleOption((o) =>
+        o.setName("role").setDescription("New role").setRequired(true),
+      ),
+  );
+add(staffCmd, "Staff", "Managers", async (i) => {
+  if (!manager(i)) return deny(i, "Only managers can manage staff.");
+  const s = i.options.getSubcommand(),
+    u = i.options.getUser("user");
+  if (s === "remove") {
+    store.removeStaff(i.guildId, u.id);
+    return i.reply({
+      embeds: [embed("Staff removed", `${u} is no longer registered staff.`)],
+    });
+  }
+  const role = i.options.getRole("role");
+  store.upsertStaff(i.guildId, u.id, role?.id || null, i.user.id);
+  if (role) {
+    const m = await i.guild.members.fetch(u.id);
+    if (!m.roles.cache.has(role.id)) await m.roles.add(role);
+  }
+  return i.reply({
+    embeds: [
+      embed(
+        s === "add" ? "Staff added" : "Staff upgraded",
+        `${u} is registered as staff.`,
+      ),
+    ],
+  });
+});
+const tags = new SlashCommandBuilder()
+  .setName("tag")
+  .setDescription("Manage staff expertise")
+  .addSubcommand((s) =>
+    s
+      .setName("add")
+      .setDescription("Assign a tag")
+      .addStringOption((o) =>
+        o.setName("tag").setDescription("Tag").setRequired(true),
+      )
+      .addUserOption((o) => o.setName("user").setDescription("Staff member")),
+  )
+  .addSubcommand((s) =>
+    s
+      .setName("remove")
+      .setDescription("Remove a tag")
+      .addStringOption((o) =>
+        o.setName("tag").setDescription("Tag").setRequired(true),
+      )
+      .addUserOption((o) => o.setName("user").setDescription("Staff member")),
+  )
+  .addSubcommand((s) => s.setName("list").setDescription("List your tags"))
+  .addSubcommand((s) =>
+    s
+      .setName("check")
+      .setDescription("Find staff with a tag")
+      .addStringOption((o) =>
+        o.setName("tag").setDescription("Tag").setRequired(true),
+      ),
+  )
+  .addSubcommand((s) =>
+    s
+      .setName("ping")
+      .setDescription("Ping staff with a tag")
+      .addStringOption((o) =>
+        o.setName("tag").setDescription("Tag").setRequired(true),
+      ),
+  )
+  .addSubcommand((s) =>
+    s
+      .setName("create")
+      .setDescription("Create a tag")
+      .addStringOption((o) =>
+        o.setName("tag").setDescription("Tag").setRequired(true),
+      ),
+  )
+  .addSubcommand((s) =>
+    s
+      .setName("delete")
+      .setDescription("Delete a tag")
+      .addStringOption((o) =>
+        o.setName("tag").setDescription("Tag").setRequired(true),
+      ),
+  );
+add(tags, "Tags", "Staff / Managers", async (i) => {
+  if (!staff(i)) return deny(i);
+  const s = i.options.getSubcommand(),
+    name = i.options.getString("tag").trim().toLowerCase();
+  if (["create", "delete"].includes(s) && !manager(i))
+    return deny(i, "Only managers can manage available tags.");
+  if (s === "create") {
+    store.tag(i.guildId, name);
+    return i.reply({ content: `Tag \`${name}\` created.` });
+  }
+  const members = store.tagMembers(i.guildId, name);
+  if (s === "ping") {
+    if (!manager(i)) return deny(i, "Only managers can ping expertise tags.");
+    if (!members.length)
+      return i.reply({ content: `No staff members have the \`${name}\` tag.` });
+    return i.reply({ content: members.map((id) => `<@${id}>`).join(" ") });
+  }
+  if (s === "check")
+    return i.reply({
+      embeds: [
+        embed(
+          `Staff with ${name}`,
+          members.length ? members.map((id) => `<@${id}>`).join("\n") : "None",
+        ),
+      ],
+    });
+  return i.reply({
+    embeds: [
+      embed(
+        "Staff tags",
+        "Tag management is guild-scoped and restricted to staff.",
+      ),
+    ],
+    ephemeral: true,
+  });
+});
+const claim = new SlashCommandBuilder()
+  .setName("claim")
+  .setDescription("Claim the current ticket");
+add(claim, "Tickets", "Staff", async (i) => {
+  if (!staff(i)) return deny(i);
+  const t = store.ticket(i.guildId, i.channelId);
+  if (!t || t.status !== "OPEN" || !t.ticket_user_id)
+    return deny(i, "This is not a recognized open ticket.");
+  store.assignTicket(i.guildId, i.channelId, i.user.id);
+  return i.reply({
+    content: `<@${t.ticket_user_id}> <@${i.user.id}> has claimed this ticket.`,
+    allowedMentions: { users: [t.ticket_user_id, i.user.id] },
+  });
+});
+const transfer = new SlashCommandBuilder()
+  .setName("transfer")
+  .setDescription("Transfer the current ticket")
+  .addUserOption((o) =>
+    o.setName("user").setDescription("Staff member").setRequired(true),
+  );
+add(transfer, "Tickets", "Staff", async (i) => {
+  if (!staff(i)) return deny(i);
+  const t = store.ticket(i.guildId, i.channelId),
+    u = i.options.getUser("user");
+  if (!t || t.status !== "OPEN" || !t.ticket_user_id)
+    return deny(i, "This is not a recognized open ticket.");
+  if (!store.isStaff(i.guildId, u.id))
+    return deny(i, "The recipient must be registered staff.");
+  store.assignTicket(i.guildId, i.channelId, u.id);
+  return i.reply({
+    content: `<@${t.ticket_user_id}> <@${u.id}> has received this ticket from <@${i.user.id}>.`,
+    allowedMentions: { users: [t.ticket_user_id, u.id, i.user.id] },
+  });
+});
+const unclaim = new SlashCommandBuilder()
+  .setName("unclaim")
+  .setDescription("Release the current ticket");
+add(unclaim, "Tickets", "Staff", async (i) => {
+  if (!staff(i)) return deny(i);
+  const t = store.ticket(i.guildId, i.channelId);
+  if (!t || !t.assigned_staff_id) return deny(i, "This ticket is not claimed.");
+  if (t.assigned_staff_id !== i.user.id && !manager(i))
+    return deny(
+      i,
+      "Only the assigned staff member or a manager can unclaim this ticket.",
+    );
+  store.assignTicket(i.guildId, i.channelId, null);
+  return i.reply({
+    content: `<@${t.ticket_user_id || "0"}> The ticket is no longer assigned.`,
+    allowedMentions: { users: t.ticket_user_id ? [t.ticket_user_id] : [] },
+  });
+});
+module.exports = { commands, metadata, store, COLOR };
+
+const settingsCmd = new SlashCommandBuilder()
+  .setName("settings")
+  .setDescription("Configure this guild")
+  .addRoleOption((o) =>
+    o.setName("mute_role").setDescription("Role used for role-based mute"),
+  )
+  .addChannelOption((o) =>
+    o.setName("support_category").setDescription("Support ticket category"),
+  )
+  .addRoleOption((o) =>
+    o
+      .setName("manager_role")
+      .setDescription("Role allowed to manage staff and settings"),
+  )
+  .addChannelOption((o) =>
+    o.setName("log_channel").setDescription("Moderation log channel"),
+  )
+  .addStringOption((o) =>
+    o
+      .setName("prefix")
+      .setDescription("Custom text-command prefix, for example m.")
+      .setMinLength(1)
+      .setMaxLength(5),
+  );
+add(settingsCmd, "Utility", "Administrator", async (i) => {
+  if (!i.memberPermissions.has(PermissionFlagsBits.Administrator))
+    return deny(i, "Only server administrators can change settings.");
+  const values = {};
+  const mute = i.options.getRole("mute_role"),
+    support = i.options.getChannel("support_category"),
+    managerRole = i.options.getRole("manager_role"),
+    log = i.options.getChannel("log_channel"),
+    prefix = i.options.getString("prefix");
+  if (mute) values.mute_role_id = mute.id;
+  if (support) {
+    if (support.type !== 4)
+      return deny(i, "Support category must be a category channel.");
+    values.support_category_id = support.id;
+  }
+  if (managerRole) values.manager_role_id = managerRole.id;
+  if (log) values.log_channel_id = log.id;
+  if (prefix) {
+    if (/\s/.test(prefix)) return deny(i, "The prefix cannot contain spaces.");
+    values.prefix = prefix;
+  }
+  if (!Object.keys(values).length) {
+    const s = store.settings(i.guildId);
+    return i.reply({
+      embeds: [
+        embed(
+          "Guild settings",
+          `Mute role: ${s.mute_role_id ? `<@&${s.mute_role_id}>` : "not set"}\nSupport category: ${s.support_category_id ? `<#${s.support_category_id}>` : "not set"}\nManager role: ${s.manager_role_id ? `<@&${s.manager_role_id}>` : "not set"}\nLog channel: ${s.log_channel_id ? `<#${s.log_channel_id}>` : "not set"}\nPrefix: ${s.prefix || "m."}`,
+        ),
+      ],
+      ephemeral: true,
+    });
+  }
+  const s = store.updateSettings(i.guildId, values);
+  return i.reply({
+    embeds: [
+      embed(
+        "Settings updated",
+        `Mute role: ${s.mute_role_id ? `<@&${s.mute_role_id}>` : "not set"}\nSupport category: ${s.support_category_id ? `<#${s.support_category_id}>` : "not set"}\nManager role: ${s.manager_role_id ? `<@&${s.manager_role_id}>` : "not set"}\nLog channel: ${s.log_channel_id ? `<#${s.log_channel_id}>` : "not set"}\nPrefix: ${s.prefix || "m."}`,
+      ),
+    ],
+  });
+});
