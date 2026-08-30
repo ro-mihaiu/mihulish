@@ -28,18 +28,26 @@ function embed(title, description, color = COLOR) {
     .setTitle(title)
     .setDescription(description);
 }
-function staff(i) {
+function staffCheck(guildId, member) {
+  if (!member) return false;
   return (
-    store.isStaff(i.guildId, i.user.id) ||
-    i.memberPermissions.has(PermissionFlagsBits.Administrator)
+    store.isStaff(guildId, member.id) ||
+    member.permissions?.has(PermissionFlagsBits.Administrator)
   );
 }
-function manager(i) {
-  const s = store.settings(i.guildId);
+function managerCheck(guildId, member) {
+  if (!member) return false;
+  const s = store.settings(guildId);
   return (
-    i.memberPermissions.has(PermissionFlagsBits.Administrator) ||
-    (s.manager_role_id && i.member.roles.cache.has(s.manager_role_id))
+    member.permissions?.has(PermissionFlagsBits.Administrator) ||
+    (Boolean(s.manager_role_id) && Boolean(member.roles?.cache?.has(s.manager_role_id)))
   );
+}
+function staff(i) {
+  return staffCheck(i.guildId, i.member);
+}
+function manager(i) {
+  return managerCheck(i.guildId, i.member);
 }
 function deny(i, text = "You must be configured staff to use this command.") {
   return i.reply({ content: text, ephemeral: true });
@@ -50,22 +58,22 @@ function target(i, name = "user") {
 function stamp(t) {
   return `<t:${Math.floor(t / 1000)}:f>`;
 }
-async function setLeaveNickname(i, type, active) {
-  const member = i.member;
-  if (!member) return null;
+async function setLeaveNickname(member, guild, type, active) {
+  if (!member || !guild) return null;
   const prefix = type === "loa" ? "LOA" : "SLOA";
   if (active) {
     try {
-      if (member.id === i.guild.ownerId) {
+      if (member.id === guild.ownerId) {
         return "Cannot rename the server owner.";
       }
       if (
-        member.roles.highest.position >= i.guild.members.me.roles.highest.position
+        guild.members.me &&
+        member.roles.highest.position >= guild.members.me.roles.highest.position
       ) {
         return "Cannot rename a member with an equal or higher role than the bot.";
       }
       const originalNick = member.nickname || member.user.username;
-      store.saveOriginalNickname(i.guildId, member.id, originalNick);
+      store.saveOriginalNickname(guild.id, member.id, originalNick);
       await member.setNickname(`${prefix} | ${member.user.username}`);
       return null;
     } catch (e) {
@@ -76,8 +84,8 @@ async function setLeaveNickname(i, type, active) {
     }
   } else {
     try {
-      const originalNick = store.getOriginalNickname(i.guildId, member.id);
-      store.deleteOriginalNickname(i.guildId, member.id);
+      const originalNick = store.getOriginalNickname(guild.id, member.id);
+      store.deleteOriginalNickname(guild.id, member.id);
       if (originalNick) {
         await member.setNickname(originalNick);
       } else {
@@ -93,45 +101,87 @@ async function setLeaveNickname(i, type, active) {
   }
 }
 
+function buildHelpEmbed(prefix = "m.") {
+  const helpEmbed = new EmbedBuilder()
+    .setColor(COLOR)
+    .setTitle("Mihulish — Commands")
+    .setDescription(
+      "A dark, terminal-inspired Discord utility bot for moderation, staff management, tickets, and LOA/SLOA.\n\n" +
+      `Commands can be used via slash commands (\`/command\`) or server prefix (\`${prefix}command\`).\n` +
+      `Server prefix: \`${prefix}\``,
+    );
+
+  const categories = [
+    {
+      name: "🛡️ Moderation",
+      cmds: [
+        { name: "warn", desc: "Warn a member with a reason" },
+        { name: "warns", desc: "View warning history for a member" },
+        { name: "warnings", desc: "View recent server-wide warnings" },
+        { name: "mute", desc: "Timeout a member for specified minutes" },
+        { name: "kick", desc: "Kick a member from the server" },
+        { name: "ban", desc: "Ban a member from the server" },
+        { name: "softban", desc: "Softban a member (ban and prune messages)" },
+        { name: "bans", desc: "List active server bans" },
+      ],
+    },
+    {
+      name: "📋 Staff & Leave",
+      cmds: [
+        { name: "staff", desc: "Add, remove, or upgrade staff members" },
+        { name: "loa", desc: "Manage leave of absence status, rules, or list" },
+        { name: "sloa", desc: "Manage semi leave of absence status, rules, or list" },
+        { name: "tag", desc: "Manage staff expertise tags and assignments" },
+      ],
+    },
+    {
+      name: "🎫 Tickets",
+      cmds: [
+        { name: "claim", desc: "Claim the current support ticket" },
+        { name: "transfer", desc: "Transfer ticket to another staff member" },
+        { name: "unclaim", desc: "Release claim on the current ticket" },
+      ],
+    },
+    {
+      name: "⚙️ Utility & Settings",
+      cmds: [
+        { name: "help", desc: "Learn about Mihulish and show all commands" },
+        { name: "prefix", desc: "Check current server prefix" },
+        { name: "settings", desc: "View or configure server roles, channels, and prefix" },
+      ],
+    },
+  ];
+
+  for (const cat of categories) {
+    const value = cat.cmds
+      .map((c) => `\`${c.name}\` — ${c.desc}`)
+      .join("\n");
+    helpEmbed.addFields({ name: cat.name, value: value || "None", inline: false });
+  }
+
+  return helpEmbed;
+}
+
+function buildHelpRow() {
+  return new ActionRowBuilder().addComponents(
+    new ButtonBuilder()
+      .setLabel("Documentation")
+      .setStyle(ButtonStyle.Link)
+      .setURL(DOCS),
+  );
+}
+
 add(
   new SlashCommandBuilder()
     .setName("help")
-    .setDescription("Learn about Mihulish"),
-  "Utility",
-  "Everyone",
-  (i) =>
-    i.reply({
-      embeds: [
-        embed(
-          "Mihulish",
-          "A dark, terminal-inspired Discord utility bot for moderation, staff management, tickets, and LOA/SLOA.\n\nRead the official documentation for setup and usage.",
-        ),
-      ],
-      components: [
-        new ActionRowBuilder().addComponents(
-          new ButtonBuilder()
-            .setLabel("Documentation")
-            .setStyle(ButtonStyle.Link)
-            .setURL(DOCS),
-        ),
-      ],
-    }),
-);
-add(
-  new SlashCommandBuilder()
-    .setName("commands")
-    .setDescription("Browse all Mihulish commands"),
+    .setDescription("Learn about Mihulish and view all commands"),
   "Utility",
   "Everyone",
   (i) => {
-    const text = metadata
-      .map(
-        (x) => `**/${x.name}** — ${x.description}\nPermission: ${x.permission}`,
-      )
-      .join("\n\n");
+    const p = store.getPrefix(i.guildId);
     return i.reply({
-      embeds: [embed("Mihulish Commands", text.slice(0, 4096))],
-      ephemeral: true,
+      embeds: [buildHelpEmbed(p)],
+      components: [buildHelpRow()],
     });
   },
 );
@@ -192,7 +242,7 @@ add(loa, "LOA", "Staff", async (i) => {
       null,
       d ? Date.now() + d * 86400000 : null,
     );
-    const nickError = await setLeaveNickname(i, "loa", a);
+    const nickError = await setLeaveNickname(i.member, i.guild, "loa", a);
     const embedText = nickError
       ? `${i.user} — ${r}\n⚠️ ${nickError}`
       : `${i.user} — ${r}`;
@@ -284,7 +334,7 @@ add(sloa, "SLOA", "Staff", async (i) => {
       i.options.getString("availability"),
       d ? Date.now() + d * 86400000 : null,
     );
-    const nickError = await setLeaveNickname(i, "sloa", a);
+    const nickError = await setLeaveNickname(i.member, i.guild, "sloa", a);
     const embedText = nickError
       ? `${i.user} — ${i.options.getString("availability")}\n⚠️ ${nickError}`
       : `${i.user} — ${i.options.getString("availability")}`;
@@ -694,7 +744,6 @@ add(unclaim, "Tickets", "Staff", async (i) => {
     allowedMentions: { users: t.ticket_user_id ? [t.ticket_user_id] : [] },
   });
 });
-module.exports = { commands, metadata, store, COLOR };
 
 const settingsCmd = new SlashCommandBuilder()
   .setName("settings")
@@ -724,12 +773,12 @@ add(settingsCmd, "Utility", "Administrator", async (i) => {
   if (!i.memberPermissions.has(PermissionFlagsBits.Administrator))
     return deny(i, "Only server administrators can change settings.");
   const values = {};
-  const mute = i.options.getRole("mute_role"),
+  const muteRole = i.options.getRole("mute_role"),
     support = i.options.getChannel("support_category"),
     managerRole = i.options.getRole("manager_role"),
     log = i.options.getChannel("log_channel"),
     prefix = i.options.getString("prefix");
-  if (mute) values.mute_role_id = mute.id;
+  if (muteRole) values.mute_role_id = muteRole.id;
   if (support) {
     if (support.type !== 4)
       return deny(i, "Support category must be a category channel.");
@@ -763,3 +812,18 @@ add(settingsCmd, "Utility", "Administrator", async (i) => {
     ],
   });
 });
+
+module.exports = {
+  commands,
+  metadata,
+  store,
+  COLOR,
+  DOCS,
+  embed,
+  buildHelpEmbed,
+  buildHelpRow,
+  setLeaveNickname,
+  staffCheck,
+  managerCheck,
+  stamp,
+};
