@@ -5,10 +5,13 @@ const {
   buildHelpEmbed,
   buildHelpRow,
   setLeaveNickname,
+  staffStatusLine,
   staffCheck,
   managerCheck,
   isBotOwner,
   stamp,
+  logCommand,
+  logModeration,
 } = require("./commands");
 
 const DEFAULT_PREFIX = "m.";
@@ -98,6 +101,13 @@ async function handlePrefixMessage(message) {
   if (!command) return;
 
   const p = getPrefix(message.guild.id);
+
+  logCommand(message.guild.id, message.client, {
+    command: `${p}${command.name}`,
+    input: command.arguments.join(" "),
+    user: message.author,
+    channelName: message.channel?.name,
+  }).catch(() => {});
 
   if (command.name === "help") {
     return reply(message, {
@@ -208,6 +218,48 @@ async function handlePrefixMessage(message) {
     );
   }
 
+  if (command.name === "invite") {
+    return reply(message, {
+      embeds: [embed("Invite Mihulish", "Click the link below to invite me to your server.\nhttps://invite.ro-mihaiu.xyz")],
+    });
+  }
+
+  if (command.name === "vote") {
+    const result = store.vote(message.guild.id, message.author.id);
+    if (!result.ok) {
+      return reply(message, {
+        embeds: [
+          embed("Vote cooldown", `You can vote again in **${result.remainingMinutes}** minute(s).\nCurrent streak: **${result.streak}** 🔥`),
+        ],
+      });
+    }
+    const desc = [];
+    desc.push(`**Your vote** has been recorded!`);
+    desc.push(`**Server streak:** **${result.streak}** 🔥`);
+    if (result.isNewStreak) desc.push("*(streak reset — votes had expired)*");
+    if (result.prevVoterId && result.prevVoterId !== message.author.id) {
+      desc.push(`Last vote by <@${result.prevVoterId}>`);
+    }
+    return reply(message, {
+      embeds: [embed("Vote recorded", desc.join("\n"))],
+    });
+  }
+
+  if (command.name === "votes") {
+    const v = store.getVotes(message.guild.id);
+    const desc = [];
+    desc.push(`**Current streak:** **${v.streak}** 🔥`);
+    if (v.lastVoterId) {
+      desc.push(`Last vote by <@${v.lastVoterId}>`);
+      desc.push(`<t:${Math.floor(v.lastVoteAt / 1000)}:R>`);
+    } else {
+      desc.push("No votes yet — use `" + p + "vote` to start the streak!");
+    }
+    return reply(message, {
+      embeds: [embed("Server vote streak", desc.join("\n"))],
+    });
+  }
+
   if (command.name === "warn") {
     if (
       !message.member.permissions.has(PermissionFlagsBits.ModerateMembers) &&
@@ -223,6 +275,12 @@ async function handlePrefixMessage(message) {
       return reply(message, `Usage: \`${p}warn <@user|id> <reason>\``);
     }
     const w = store.addWarning(message.guild.id, targetUser.id, message.author.id, reason);
+    logModeration(message.guild.id, message.client, {
+      action: "warn",
+      targetId: targetUser.id,
+      moderatorId: message.author.id,
+      reason,
+    });
     return reply(message, {
       embeds: [
         embed(
@@ -255,6 +313,12 @@ async function handlePrefixMessage(message) {
       return reply(message, `Warning #${id} does not belong to <@${targetUser.id}>.`);
     }
     store.deleteWarning(message.guild.id, id);
+    logModeration(message.guild.id, message.client, {
+      action: "unwarn",
+      targetId: targetUser.id,
+      moderatorId: message.author.id,
+      reason: w.reason,
+    });
     return reply(message, {
       embeds: [
         embed(
@@ -368,6 +432,12 @@ async function handlePrefixMessage(message) {
       await targetMember.roles.remove(s.mute_role_id).catch(() => {});
     }
     await targetMember.timeout(null, reason);
+    logModeration(message.guild.id, message.client, {
+      action: "unmute",
+      targetId: targetMember.id,
+      moderatorId: message.author.id,
+      reason,
+    });
     return reply(message, {
       embeds: [
         embed(
@@ -405,6 +475,12 @@ async function handlePrefixMessage(message) {
       return reply(message, "You cannot moderate a member with an equal or higher role.");
     }
     await targetMember.kick(reason);
+    logModeration(message.guild.id, message.client, {
+      action: "kick",
+      targetId: targetMember.id,
+      moderatorId: message.author.id,
+      reason,
+    });
     return reply(message, {
       embeds: [
         embed("Kick complete", `<@${targetMember.id}> was kicked.\nReason: ${reason}`),
@@ -446,6 +522,12 @@ async function handlePrefixMessage(message) {
         deleteMessageSeconds: 86400 * 7,
       });
       await message.guild.members.unban(targetUser.id, "Softban unban");
+      logModeration(message.guild.id, message.client, {
+        action: "softban",
+        targetId: targetUser.id,
+        moderatorId: message.author.id,
+        reason,
+      });
       return reply(message, {
         embeds: [
           embed("Softban complete", `<@${targetUser.id}> was softbanned.\nReason: ${reason}`),
@@ -453,6 +535,12 @@ async function handlePrefixMessage(message) {
       });
     } else {
       await message.guild.members.ban(targetUser.id, { reason });
+      logModeration(message.guild.id, message.client, {
+        action: "ban",
+        targetId: targetUser.id,
+        moderatorId: message.author.id,
+        reason,
+      });
       return reply(message, {
         embeds: [
           embed("Ban complete", `<@${targetUser.id}> was banned.\nReason: ${reason}`),
@@ -476,6 +564,12 @@ async function handlePrefixMessage(message) {
     }
     try {
       await message.guild.members.unban(targetUser.id, reason);
+      logModeration(message.guild.id, message.client, {
+        action: "unban",
+        targetId: targetUser.id,
+        moderatorId: message.author.id,
+        reason,
+      });
     } catch (e) {
       if (e.code === 10026) {
         return reply(message, "That user is not banned.");
@@ -691,11 +785,25 @@ async function handlePrefixMessage(message) {
     return reply(message, `Usage: \`${p}sloa <rules|status|check|list>\``);
   }
 
-  if (command.name === "staff") {
+  if (command.name === "staff" || command.name === "staffs") {
+    const [sub, userArg, roleArg] = command.arguments;
+    if (command.name === "staffs" || sub === "list") {
+      if (!staffCheck(message.guild.id, message.member, message.client)) {
+        return reply(message, "You must be configured staff to use this command.");
+      }
+      const rows = store.listStaffStatuses(message.guild.id);
+      return reply(message, {
+        embeds: [
+          embed(
+            "Configured staff",
+            rows.length ? rows.map(staffStatusLine).join("\n") : "No staff configured.",
+          ),
+        ],
+      });
+    }
     if (!managerCheck(message.guild.id, message.member, message.client)) {
       return reply(message, "Only managers can manage staff.");
     }
-    const [sub, userArg, roleArg] = command.arguments;
     if (sub === "remove") {
       const targetUser = await resolveUser(message.client, message.guild, userArg);
       if (!targetUser) return reply(message, `Usage: \`${p}staff remove <@user|id>\``);
@@ -726,7 +834,7 @@ async function handlePrefixMessage(message) {
         ],
       });
     }
-    return reply(message, `Usage: \`${p}staff <add|remove|upgrade> <@user> [@role]\``);
+    return reply(message, `Usage: \`${p}staff <list|add|remove|upgrade> [@user] [@role]\``);
   }
 
   if (command.name === "tag") {

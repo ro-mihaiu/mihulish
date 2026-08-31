@@ -7,6 +7,7 @@ const {
   ButtonStyle,
 } = require("discord.js");
 const store = require("./database");
+const { makeEmbed, logCommand, logEvent, logModeration } = require("./utils");
 const COLOR = 0xe91e63;
 const DOCS = "https://mihulish.ro-mihaiu.xyz";
 const metadata = [];
@@ -71,6 +72,22 @@ function target(i, name = "user") {
 }
 function stamp(t) {
   return `<t:${Math.floor(t / 1000)}:f>`;
+}
+function staffStatusLine(row) {
+  let status = "";
+  let details = "";
+  if (row.loa_active) {
+    status = "LOA";
+    details = row.loa_ends_at
+      ? `${Math.max(1, Math.ceil((row.loa_ends_at - Date.now()) / 86400000))} days`
+      : "ongoing";
+    if (row.loa_reason) details += ` · ${row.loa_reason}`;
+  } else if (row.sloa_active) {
+    status = "SLOA";
+    details = row.sloa_availability || row.sloa_reason || "ongoing";
+    if (row.sloa_reason && row.sloa_reason !== details) details += ` · ${row.sloa_reason}`;
+  }
+  return `<@${row.user_id}> — \`${status}\`${details ? ` — ${details}` : ""}`;
 }
 async function setLeaveNickname(member, guild, type, active) {
   if (!member || !guild) return null;
@@ -145,7 +162,7 @@ function buildHelpEmbed(prefix = "m.") {
     {
       name: "📋 Staff & Leave",
       cmds: [
-        { name: "staff", desc: "Add, remove, or upgrade staff members" },
+        { name: "staff", desc: "List or manage configured staff members" },
         { name: "loa", desc: "Manage leave of absence status, rules, or list" },
         { name: "sloa", desc: "Manage semi leave of absence status, rules, or list" },
         { name: "tag", desc: "Manage staff expertise tags and assignments" },
@@ -165,6 +182,9 @@ function buildHelpEmbed(prefix = "m.") {
         { name: "help", desc: "Learn about Mihulish and show all commands" },
         { name: "prefix", desc: "Check current server prefix" },
         { name: "settings", desc: "View or configure server roles, channels, and prefix" },
+        { name: "invite", desc: "Get the bot invite link" },
+        { name: "vote", desc: "Vote for this server and grow the streak" },
+        { name: "votes", desc: "View the server vote streak" },
       ],
     },
   ];
@@ -202,6 +222,57 @@ add(
     });
   },
 );
+const invite = new SlashCommandBuilder()
+  .setName("invite")
+  .setDescription("Get the bot invite link");
+add(invite, "Utility", "Everyone", async (i) => {
+  return i.reply({
+    embeds: [
+      embed("Invite Mihulish", "Click the link below to invite me to your server.\nhttps://invite.ro-mihaiu.xyz"),
+    ],
+  });
+});
+const vote = new SlashCommandBuilder()
+  .setName("vote")
+  .setDescription("Vote for this server");
+add(vote, "Utility", "Everyone", async (i) => {
+  const result = store.vote(i.guildId, i.user.id);
+  if (!result.ok) {
+    return i.reply({
+      embeds: [
+        embed("Vote cooldown", `You can vote again in **${result.remainingMinutes}** minute(s).\nCurrent streak: **${result.streak}** 🔥`),
+      ],
+      ephemeral: true,
+    });
+  }
+  const desc = [];
+  desc.push(`**Your vote** has been recorded!`);
+  desc.push(`**Server streak:** **${result.streak}** 🔥`);
+  if (result.isNewStreak) desc.push("*(streak reset — votes had expired)*");
+  if (result.prevVoterId && result.prevVoterId !== i.user.id) {
+    desc.push(`Last vote by <@${result.prevVoterId}>`);
+  }
+  return i.reply({
+    embeds: [embed("Vote recorded", desc.join("\n"))],
+  });
+});
+const votes = new SlashCommandBuilder()
+  .setName("votes")
+  .setDescription("View the server vote streak");
+add(votes, "Utility", "Everyone", async (i) => {
+  const v = store.getVotes(i.guildId);
+  const desc = [];
+  desc.push(`**Current streak:** **${v.streak}** 🔥`);
+  if (v.lastVoterId) {
+    desc.push(`Last vote by <@${v.lastVoterId}>`);
+    desc.push(`<t:${Math.floor(v.lastVoteAt / 1000)}:R>`);
+  } else {
+    desc.push("No votes yet — use `/vote` to start the streak!");
+  }
+  return i.reply({
+    embeds: [embed("Server vote streak", desc.join("\n"))],
+  });
+});
 const loa = new SlashCommandBuilder()
   .setName("loa")
   .setDescription("Manage leave of absence")
@@ -414,6 +485,12 @@ add(
     const u = target(i),
       r = i.options.getString("reason");
     const w = store.addWarning(i.guildId, u.id, i.user.id, r);
+    logModeration(i.guildId, i.client, {
+      action: "warn",
+      targetId: u.id,
+      moderatorId: i.user.id,
+      reason: r,
+    });
     return i.reply({
       embeds: [
         embed(
@@ -454,6 +531,12 @@ add(
     if (w.user_id !== u.id)
       return deny(i, `Warning #${id} does not belong to ${u}.`);
     store.deleteWarning(i.guildId, id);
+    logModeration(i.guildId, i.client, {
+      action: "unwarn",
+      targetId: u.id,
+      moderatorId: i.user.id,
+      reason: w.reason,
+    });
     return i.reply({
       embeds: [
         embed(
@@ -539,6 +622,12 @@ function moderation(name, perm, method, label) {
           "That moderation action is unavailable for this target.",
         );
       await m[method](r);
+      logModeration(i.guildId, i.client, {
+        action: name,
+        targetId: m.id,
+        moderatorId: i.user.id,
+        reason: r,
+      });
       return i.reply({
         embeds: [
           embed(
@@ -591,6 +680,12 @@ add(mute, "Moderation", "Moderate Members", async (i) => {
     i.options.getInteger("minutes") * 60000,
     i.options.getString("reason") || "No reason provided",
   );
+  logModeration(i.guildId, i.client, {
+    action: "mute",
+    targetId: m.id,
+    moderatorId: i.user.id,
+    reason: i.options.getString("reason") || "No reason provided",
+  });
   return i.reply({ embeds: [embed("Mute complete", `${m} was timed out.`)] });
 });
 const unmute = new SlashCommandBuilder()
@@ -622,6 +717,12 @@ add(unmute, "Moderation", "Moderate Members", async (i) => {
     await m.roles.remove(s.mute_role_id).catch(() => {});
   }
   await m.timeout(null, r);
+  logModeration(i.guildId, i.client, {
+    action: "unmute",
+    targetId: m.id,
+    moderatorId: i.user.id,
+    reason: r,
+  });
   return i.reply({
     embeds: [embed("Unmute complete", `${m} was unmuted.\nReason: ${r}`)],
   });
@@ -644,6 +745,12 @@ add(unban, "Moderation", "Ban Members", async (i) => {
   const r = i.options.getString("reason") || "No reason provided";
   try {
     await i.guild.members.unban(u.id, r);
+    logModeration(i.guildId, i.client, {
+      action: "unban",
+      targetId: u.id,
+      moderatorId: i.user.id,
+      reason: r,
+    });
   } catch (e) {
     if (e.code === 10026) {
       return deny(i, "That user is not banned.");
@@ -712,11 +819,19 @@ const staffCmd = new SlashCommandBuilder()
       .addRoleOption((o) =>
         o.setName("role").setDescription("New role").setRequired(true),
       ),
-  );
-add(staffCmd, "Staff", "Managers", async (i) => {
+  )
+  .addSubcommand((s) => s.setName("list").setDescription("List all configured staff"));
+add(staffCmd, "Staff", "Staff", async (i) => {
+  const s = i.options.getSubcommand();
+  if (s === "list") {
+    if (!staff(i)) return deny(i);
+    const rows = store.listStaffStatuses(i.guildId);
+    return i.reply({
+      embeds: [embed("Configured staff", rows.length ? rows.map(staffStatusLine).join("\n") : "No staff configured.")],
+    });
+  }
   if (!manager(i)) return deny(i, "Only managers can manage staff.");
-  const s = i.options.getSubcommand(),
-    u = i.options.getUser("user");
+  const u = i.options.getUser("user");
   if (s === "remove") {
     store.removeStaff(i.guildId, u.id);
     return i.reply({
@@ -959,11 +1074,16 @@ module.exports = {
   COLOR,
   DOCS,
   embed,
+  makeEmbed,
   buildHelpEmbed,
   buildHelpRow,
   setLeaveNickname,
+  staffStatusLine,
   staffCheck,
   managerCheck,
   isBotOwner,
   stamp,
+  logCommand,
+  logEvent,
+  logModeration,
 };

@@ -8,6 +8,7 @@ const {
 } = require("discord.js");
 const { commands, store } = require("./commands");
 const { handlePrefixMessage } = require("./prefix");
+const { logCommand, logEvent } = require("./commands");
 
 const client = new Client({
   intents: [
@@ -83,10 +84,26 @@ async function inspectTicket(channel) {
 client.on(Events.ChannelCreate, inspectTicket);
 client.on(Events.ChannelUpdate, (_old, next) => inspectTicket(next));
 client.on(Events.MessageCreate, handlePrefixMessage);
+
 client.on(Events.InteractionCreate, async (i) => {
   if (!i.isChatInputCommand() || !i.guildId) return;
   const command = commands.find((c) => c.data.name === i.commandName);
   if (!command) return;
+  logCommand(i.guildId, i.client, {
+    command: `/${i.commandName}`,
+    input: i.options.data
+      .filter((o) => o.value !== undefined)
+      .map((o) => {
+        let value = o.value;
+        if (o.type === 6) value = `<@${value}>`;
+        else if (o.type === 7) value = `<#${value}>`;
+        else if (o.type === 8) value = `<@&${value}>`;
+        return `${o.name}: ${value}`;
+      })
+      .join(", "),
+    user: i.user,
+    channelName: i.channel?.name,
+  }).catch(() => {});
   try {
     await command.execute(i);
   } catch (e) {
@@ -99,6 +116,50 @@ client.on(Events.InteractionCreate, async (i) => {
     else await i.reply(reply).catch(() => {});
   }
 });
+
+client.on(Events.GuildMemberAdd, (member) => {
+  logEvent(member.guild.id, member.client, {
+    title: "📥 Member Joined",
+    description: `${member} - ${member.user.username} joined the server.\n**Account created:** <t:${Math.floor(member.user.createdTimestamp / 1000)}:R>`,
+  }).catch(() => {});
+});
+
+client.on(Events.GuildMemberRemove, (member) => {
+  logEvent(member.guild.id, member.client, {
+    title: "📤 Member Left",
+    description: `${member} - ${member.user.username} left the server.`,
+  }).catch(() => {});
+});
+
+client.on(Events.GuildBanAdd, (ban) => {
+  logEvent(ban.guild.id, ban.client, {
+    title: "🔨 Member Banned",
+    description: `${ban.user} - ${ban.user.username} was banned.\n**Reason:** ${ban.reason || "No reason provided"}`,
+  }).catch(() => {});
+});
+
+client.on(Events.GuildBanRemove, (ban) => {
+  logEvent(ban.guild.id, ban.client, {
+    title: "🔓 Member Unbanned",
+    description: `${ban.user} - ${ban.user.username} was unbanned.`,
+  }).catch(() => {});
+});
+
+client.on(Events.GuildMemberUpdate, (oldMember, newMember) => {
+  if (!oldMember.communicationDisabledUntilTimestamp && newMember.communicationDisabledUntilTimestamp) {
+    const until = newMember.communicationDisabledUntilTimestamp;
+    logEvent(newMember.guild.id, newMember.client, {
+      title: "🔇 Member Muted (Timeout)",
+      description: `${newMember} - ${newMember.user.username} was muted.\n**Until:** <t:${Math.floor(until / 1000)}:F> (<t:${Math.floor(until / 1000)}:R>)`,
+    }).catch(() => {});
+  } else if (oldMember.communicationDisabledUntilTimestamp && !newMember.communicationDisabledUntilTimestamp) {
+    logEvent(newMember.guild.id, newMember.client, {
+      title: "🔊 Member Unmuted",
+      description: `${newMember} - ${newMember.user.username} was unmuted.`,
+    }).catch(() => {});
+  }
+});
+
 client.on(Events.Error, (e) => console.error("[discord]", e));
 process.on("unhandledRejection", (e) => console.error("[promise]", e));
 if (require.main === module) {

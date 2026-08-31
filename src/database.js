@@ -41,6 +41,8 @@ CREATE TABLE IF NOT EXISTS tickets (id INTEGER PRIMARY KEY AUTOINCREMENT, guild_
 CREATE TABLE IF NOT EXISTS sticky_messages (id INTEGER PRIMARY KEY AUTOINCREMENT, guild_id TEXT NOT NULL, channel_id TEXT NOT NULL, message_id TEXT, content TEXT NOT NULL, updated_at INTEGER NOT NULL, UNIQUE(guild_id,channel_id));
 CREATE TABLE IF NOT EXISTS moderation_logs (id INTEGER PRIMARY KEY AUTOINCREMENT, guild_id TEXT NOT NULL, action TEXT NOT NULL, target_id TEXT, moderator_id TEXT, reason TEXT, created_at INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS original_nicknames (guild_id TEXT NOT NULL, user_id TEXT NOT NULL, nickname TEXT, PRIMARY KEY (guild_id, user_id));
+CREATE TABLE IF NOT EXISTS votes (guild_id TEXT PRIMARY KEY REFERENCES guilds(guild_id) ON DELETE CASCADE, streak INTEGER NOT NULL DEFAULT 0, last_vote_at INTEGER, last_voter_id TEXT);
+CREATE TABLE IF NOT EXISTS user_votes (guild_id TEXT NOT NULL, user_id TEXT NOT NULL, last_vote_at INTEGER NOT NULL, PRIMARY KEY (guild_id, user_id));
 `);
 
 const DEFAULT_TICKET_PANELS = ["java", "br", "bug", "report", "partnership"];
@@ -187,6 +189,13 @@ function removeStaff(g, u) {
 function listStaff(g) {
   return db.prepare("SELECT * FROM staff WHERE guild_id=?").all(g);
 }
+function listStaffStatuses(g) {
+  return db
+    .prepare(
+      "SELECT st.*, l.active AS loa_active, l.reason AS loa_reason, l.started_at AS loa_started_at, l.ends_at AS loa_ends_at, s.active AS sloa_active, s.reason AS sloa_reason, s.availability AS sloa_availability, s.started_at AS sloa_started_at, s.ends_at AS sloa_ends_at FROM staff st LEFT JOIN loa l ON l.guild_id=st.guild_id AND l.user_id=st.user_id LEFT JOIN sloa s ON s.guild_id=st.guild_id AND s.user_id=st.user_id WHERE st.guild_id=? ORDER BY st.created_at",
+    )
+    .all(g);
+}
 function tag(g, name, display = name) {
   ensureGuild(g);
   db.prepare(
@@ -258,6 +267,64 @@ function userTags(g, u) {
     )
     .all(g, u);
 }
+function addModerationLog(guildId, action, targetId, moderatorId, reason) {
+  ensureGuild(guildId);
+  return db
+    .prepare(
+      "INSERT INTO moderation_logs(guild_id,action,target_id,moderator_id,reason,created_at) VALUES(?,?,?,?,?,?)",
+    )
+    .run(guildId, action, targetId || null, moderatorId, reason || null, Date.now());
+}
+function getModerationLogs(guildId, targetId = null) {
+  let q = "SELECT * FROM moderation_logs WHERE guild_id=?",
+    a = [guildId];
+  if (targetId) {
+    q += " AND target_id=?";
+    a.push(targetId);
+  }
+  return db.prepare(q + " ORDER BY created_at DESC").all(...a);
+}
+function vote(guildId, userId) {
+  ensureGuild(guildId);
+  const row = db
+    .prepare("SELECT * FROM votes WHERE guild_id=?")
+    .get(guildId);
+  const now = Date.now();
+  const STREAK_RESET_MS = 48 * 60 * 60 * 1000;
+  const USER_COOLDOWN_MS = 12 * 60 * 60 * 1000;
+  const userRow = db
+    .prepare("SELECT * FROM user_votes WHERE guild_id=? AND user_id=?")
+    .get(guildId, userId);
+  if (userRow && now - userRow.last_vote_at < USER_COOLDOWN_MS) {
+    const remaining = Math.ceil((USER_COOLDOWN_MS - (now - userRow.last_vote_at)) / 60000);
+    return { ok: false, remainingMinutes: remaining, streak: row?.streak || 0, lastVoterId: row?.last_voter_id || null };
+  }
+  let streak = 0;
+  if (row && row.last_vote_at && now - row.last_vote_at < STREAK_RESET_MS) {
+    streak = row.streak + 1;
+  } else {
+    streak = 1;
+  }
+  db.prepare(
+    "INSERT INTO votes(guild_id,streak,last_vote_at,last_voter_id) VALUES(?,?,?,?) ON CONFLICT(guild_id) DO UPDATE SET streak=excluded.streak,last_vote_at=excluded.last_vote_at,last_voter_id=excluded.last_voter_id",
+  ).run(guildId, streak, now, userId);
+  db.prepare(
+    "INSERT INTO user_votes(guild_id,user_id,last_vote_at) VALUES(?,?,?) ON CONFLICT(guild_id,user_id) DO UPDATE SET last_vote_at=excluded.last_vote_at",
+  ).run(guildId, userId, now);
+  const updated = db
+    .prepare("SELECT * FROM votes WHERE guild_id=?")
+    .get(guildId);
+  const prevVoter = row?.last_voter_id || null;
+  const isNewStreak = streak === 1 && (!row || !row.last_vote_at || now - row.last_vote_at >= STREAK_RESET_MS);
+  return { ok: true, streak: updated.streak, lastVoterId: updated.last_voter_id, prevVoterId: prevVoter, isNewStreak };
+}
+function getVotes(guildId) {
+  const row = db
+    .prepare("SELECT * FROM votes WHERE guild_id=?")
+    .get(guildId);
+  if (!row) return { streak: 0, lastVoterId: null, lastVoteAt: null };
+  return { streak: row.streak, lastVoterId: row.last_voter_id, lastVoteAt: row.last_vote_at };
+}
 module.exports = {
   db,
   ensureGuild,
@@ -275,6 +342,7 @@ module.exports = {
   upsertStaff,
   removeStaff,
   listStaff,
+  listStaffStatuses,
   tag,
   tagMembers,
   ticket,
@@ -287,4 +355,8 @@ module.exports = {
   saveOriginalNickname,
   getOriginalNickname,
   deleteOriginalNickname,
+  addModerationLog,
+  getModerationLogs,
+  vote,
+  getVotes,
 };
