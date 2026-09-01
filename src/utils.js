@@ -4,11 +4,13 @@ const store = require("./database");
 const COLOR = 0xe91e63;
 
 function makeEmbed(title, description) {
+  const safeTitle = String(title ?? "Mihulish Log");
+  const safeDescription = String(description ?? "No details provided.");
   return new ContainerBuilder()
     .setAccentColor(COLOR)
     .addTextDisplayComponents(
-      new TextDisplayBuilder().setContent(`## ${title}`),
-      new TextDisplayBuilder().setContent(description),
+      new TextDisplayBuilder().setContent(`## ${safeTitle}`),
+      new TextDisplayBuilder().setContent(safeDescription),
       new SeparatorBuilder().setDivider(true),
       new TextDisplayBuilder().setContent(`Logged <t:${Math.floor(Date.now() / 1000)}:F>`),
     );
@@ -46,7 +48,7 @@ async function logCommand(guildId, client, { command, input = "", user, channelN
   }
 }
 
-async function logEvent(guildId, client, { title, description }) {
+async function logEvent(guildId, client, { title = "Event Log", description = "No details provided." } = {}) {
   const ch = await getLogChannel(guildId, client);
   if (!ch) return;
   try {

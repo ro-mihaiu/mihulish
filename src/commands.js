@@ -70,7 +70,10 @@ function manager(i) {
 }
 function respond(i, payload) {
   const flags = (payload.flags || 0) | (payload.components ? 32768 : 0);
-  return i.reply({ ...payload, flags });
+  const response = { ...payload, flags };
+  if (i.deferred) return i.editReply(response);
+  if (i.replied) return i.followUp(response);
+  return i.reply(response);
 }
 
 function deny(i, text = "You must be configured staff to use this command.") {

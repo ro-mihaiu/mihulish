@@ -89,6 +89,12 @@ client.on(Events.InteractionCreate, async (i) => {
   if (!i.isChatInputCommand() || !i.guildId) return;
   const command = commands.find((c) => c.data.name === i.commandName);
   if (!command) return;
+  try {
+    await i.deferReply();
+  } catch (e) {
+    console.error("[interaction] failed to acknowledge command:", e);
+    return;
+  }
   logCommand(i.guildId, i.client, {
     command: `/${i.commandName}`,
     input: i.options.data
@@ -108,12 +114,9 @@ client.on(Events.InteractionCreate, async (i) => {
     await command.execute(i);
   } catch (e) {
     console.error("[interaction]", e);
-    const reply = {
+    await i.editReply({
       content: "Mihulish could not complete that request.",
-      ephemeral: true,
-    };
-    if (i.replied || i.deferred) await i.followUp(reply).catch(() => {});
-    else await i.reply(reply).catch(() => {});
+    }).catch(() => {});
   }
 });
 

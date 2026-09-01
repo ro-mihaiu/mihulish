@@ -16,6 +16,10 @@ The database is SQLite at `DATABASE_URL` (default `data/mihulish.db`) and is cre
 
 ## Per-guild settings
 
+The database is SQLite at `DATABASE_URL` (default `data/mihulish.db`) and is created automatically. Never commit `.env` or the `data` directory.
+
+## Per-guild settings
+
 Server administrators configure each guild independently with `/settings`:
 
 ```text
