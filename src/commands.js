@@ -104,7 +104,8 @@ async function buildStaffDirectory(guild) {
     const tags = store.userTags(guild.id, row.user_id).map((tag) => tag.display_name);
     const status = row.loa_active ? "LOA" : row.sloa_active ? "SLOA" : "";
     const username = member?.user.username || `Unknown user (${row.user_id})`;
-    const line = `${username}${status ? ` - ${status}` : ""}\n> ${tags.length ? tags.join(", ") : "No tags"}`;
+    const mention = `<@${row.user_id}>`;
+    const line = `${mention} (${username})${status ? ` - **${status}**` : ""}\n> ${tags.length ? tags.join(", ") : "No tags"}`;
     if (!grouped.has(roleName)) grouped.set(roleName, { position, lines: [] });
     grouped.get(roleName).lines.push(line);
   }
@@ -322,15 +323,16 @@ const loa = new SlashCommandBuilder()
           .setName("reason")
           .setDescription("Reason")
           .setRequired(true)
-          .setMaxLength(500),
-      )
-      .addIntegerOption((o) =>
-        o.setName("ends_in_days").setDescription("Optional duration in days"),
-      ),
-  )
-  .addSubcommand((s) =>
-    s
-      .setName("check")
+                  .setMaxLength(500),
+              )
+              .addIntegerOption((o) =>
+                o.setName("ends_in_days").setDescription("Optional duration in days"),
+              )
+              .addUserOption((o) => o.setName("user").setDescription("Staff member (managers only)")),
+          )
+          .addSubcommand((s) =>
+            s
+              .setName("check")
       .setDescription("Check LOA")
       .addUserOption((o) => o.setName("user").setDescription("Staff member")),
   )
@@ -350,20 +352,26 @@ add(loa, "LOA", "Staff", async (i) => {
   if (s === "status") {
     const a = i.options.getBoolean("active"),
       r = i.options.getString("reason"),
-      d = i.options.getInteger("ends_in_days");
+      d = i.options.getInteger("ends_in_days"),
+      targetUser = i.options.getUser("user") || i.user;
+    if (targetUser.id !== i.user.id && !manager(i))
+      return deny(i, "Only managers can set LOA for other staff members.");
+    const targetMember = targetUser.id === i.user.id ? i.member : await i.guild.members.fetch(targetUser.id).catch(() => null);
+    if (!store.isStaff(i.guildId, targetUser.id))
+      return deny(i, "The target user must be registered staff.");
     store.setLeave(
       "loa",
       i.guildId,
-      i.user.id,
+      targetUser.id,
       a,
       r,
       null,
       d ? Date.now() + d * 86400000 : null,
     );
-    const nickError = await setLeaveNickname(i.member, i.guild, "loa", a);
+    const nickError = await setLeaveNickname(targetMember, i.guild, "loa", a);
     const embedText = nickError
-      ? `${i.user} — ${r}\n⚠️ ${nickError}`
-      : `${i.user} — ${r}`;
+      ? `${targetUser} — ${r}\n⚠️ ${nickError}`
+      : `${targetUser} — ${r}`;
     return i.reply({
       embeds: [embed(a ? "LOA active" : "LOA removed", embedText)],
     });
@@ -415,15 +423,16 @@ const sloa = new SlashCommandBuilder()
         o
           .setName("availability")
           .setDescription("When you are available")
-          .setRequired(true),
-      )
-      .addIntegerOption((o) =>
-        o.setName("ends_in_days").setDescription("Optional duration in days"),
-      ),
-  )
-  .addSubcommand((s) =>
-    s
-      .setName("check")
+                  .setRequired(true),
+              )
+              .addIntegerOption((o) =>
+                o.setName("ends_in_days").setDescription("Optional duration in days"),
+              )
+              .addUserOption((o) => o.setName("user").setDescription("Staff member (managers only)")),
+          )
+          .addSubcommand((s) =>
+            s
+              .setName("check")
       .setDescription("Check SLOA")
       .addUserOption((o) => o.setName("user").setDescription("Staff member")),
   )
@@ -442,20 +451,26 @@ add(sloa, "SLOA", "Staff", async (i) => {
     });
   if (s === "status") {
     const a = i.options.getBoolean("active"),
-      d = i.options.getInteger("ends_in_days");
+      d = i.options.getInteger("ends_in_days"),
+      targetUser = i.options.getUser("user") || i.user;
+    if (targetUser.id !== i.user.id && !manager(i))
+      return deny(i, "Only managers can set SLOA for other staff members.");
+    const targetMember = targetUser.id === i.user.id ? i.member : await i.guild.members.fetch(targetUser.id).catch(() => null);
+    if (!store.isStaff(i.guildId, targetUser.id))
+      return deny(i, "The target user must be registered staff.");
     store.setLeave(
       "sloa",
       i.guildId,
-      i.user.id,
+      targetUser.id,
       a,
       i.options.getString("reason"),
       i.options.getString("availability"),
       d ? Date.now() + d * 86400000 : null,
     );
-    const nickError = await setLeaveNickname(i.member, i.guild, "sloa", a);
+    const nickError = await setLeaveNickname(targetMember, i.guild, "sloa", a);
     const embedText = nickError
-      ? `${i.user} — ${i.options.getString("availability")}\n⚠️ ${nickError}`
-      : `${i.user} — ${i.options.getString("availability")}`;
+      ? `${targetUser} — ${i.options.getString("availability")}\n⚠️ ${nickError}`
+      : `${targetUser} — ${i.options.getString("availability")}`;
     return i.reply({
       embeds: [
         embed(
