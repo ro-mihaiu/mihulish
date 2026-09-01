@@ -26,6 +26,11 @@ try {
 } catch (error) {
   if (!error.message.includes("duplicate column name")) throw error;
 }
+try {
+  db.exec("ALTER TABLE guild_settings ADD COLUMN staff_updated_at INTEGER");
+} catch (error) {
+  if (!error.message.includes("duplicate column name")) throw error;
+}
 
 db.exec(`
 
@@ -131,6 +136,13 @@ function warnings(g, u = null, m = null) {
   }
   return db.prepare(q + " ORDER BY created_at DESC").all(...a);
 }
+function touchStaffDirectory(g) {
+  ensureGuild(g);
+  db.prepare("UPDATE guild_settings SET staff_updated_at=? WHERE guild_id=?").run(Date.now(), g);
+}
+function getStaffDirectoryUpdatedAt(g) {
+  return settings(g).staff_updated_at || null;
+}
 function setLeave(table, g, u, active, reason, availability, endsAt) {
   ensureGuild(g);
   const cols =
@@ -153,6 +165,7 @@ function setLeave(table, g, u, active, reason, availability, endsAt) {
   db.prepare(
     `INSERT INTO ${table}(guild_id,user_id,active,${cols}) VALUES(${placeholders}) ON CONFLICT(guild_id,user_id) DO UPDATE SET active=excluded.active,reason=excluded.reason,${table === "loa" ? "started_at=excluded.started_at,ends_at=excluded.ends_at" : "availability=excluded.availability,started_at=excluded.started_at,ends_at=excluded.ends_at"}`,
   ).run(...vals);
+  touchStaffDirectory(g);
   return db
     .prepare(`SELECT * FROM ${table} WHERE guild_id=? AND user_id=?`)
     .get(g, u);
@@ -179,12 +192,16 @@ function upsertStaff(g, u, r, a) {
   db.prepare(
     "INSERT INTO staff VALUES(?,?,?,?,?) ON CONFLICT(guild_id,user_id) DO UPDATE SET role_id=excluded.role_id",
   ).run(g, u, r, a, Date.now());
+  touchStaffDirectory(g);
 }
 function removeStaff(g, u) {
-  return (
+  const removed = (
+
     db.prepare("DELETE FROM staff WHERE guild_id=? AND user_id=?").run(g, u)
       .changes > 0
   );
+  if (removed) touchStaffDirectory(g);
+  return removed;
 }
 function listStaff(g) {
   return db.prepare("SELECT * FROM staff WHERE guild_id=?").all(g);
@@ -201,9 +218,19 @@ function tag(g, name, display = name) {
   db.prepare(
     "INSERT OR IGNORE INTO tags(guild_id,name,display_name,created_at) VALUES(?,?,?,?)",
   ).run(g, name, display, Date.now());
+  touchStaffDirectory(g);
   return db
     .prepare("SELECT * FROM tags WHERE guild_id=? AND name=?")
     .get(g, name);
+}
+function listTags(g) {
+  ensureGuild(g);
+  return db.prepare("SELECT * FROM tags WHERE guild_id=? ORDER BY display_name COLLATE NOCASE").all(g);
+}
+function deleteTag(g, name) {
+  const deleted = db.prepare("DELETE FROM tags WHERE guild_id=? AND name=?").run(g, name).changes > 0;
+  if (deleted) touchStaffDirectory(g);
+  return deleted;
 }
 function tagMembers(g, name) {
   return db
@@ -240,11 +267,13 @@ function addStaffTag(g, name, u, by) {
   db.prepare(
     "INSERT OR IGNORE INTO staff_tags(guild_id,tag_id,user_id,assigned_by,created_at) VALUES(?,?,?,?,?)",
   ).run(g, t.id, u, by, Date.now());
+  touchStaffDirectory(g);
 }
 function removeStaffTag(g, name, u) {
   db.prepare(
     "DELETE FROM staff_tags WHERE guild_id=? AND tag_id=(SELECT id FROM tags WHERE guild_id=? AND name=?) AND user_id=?",
   ).run(g, g, name, u);
+  touchStaffDirectory(g);
 }
 function saveOriginalNickname(g, u, nickname) {
   db.prepare(
@@ -343,7 +372,10 @@ module.exports = {
   removeStaff,
   listStaff,
   listStaffStatuses,
+  getStaffDirectoryUpdatedAt,
   tag,
+  listTags,
+  deleteTag,
   tagMembers,
   ticket,
   saveTicket,

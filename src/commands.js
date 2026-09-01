@@ -89,6 +89,36 @@ function staffStatusLine(row) {
   }
   return `<@${row.user_id}> — \`${status}\`${details ? ` — ${details}` : ""}`;
 }
+async function buildStaffDirectory(guild) {
+  const rows = store.listStaffStatuses(guild.id);
+  if (!rows.length) return embed("Configured staff", "No staff configured.");
+
+  const members = await Promise.all(
+    rows.map(async (row) => [row, await guild.members.fetch(row.user_id).catch(() => null)]),
+  );
+  const grouped = new Map();
+  for (const [row, member] of members) {
+    const role = row.role_id ? guild.roles.cache.get(row.role_id) : null;
+    const roleName = role?.name || "No role";
+    const position = role?.position || 0;
+    const tags = store.userTags(guild.id, row.user_id).map((tag) => tag.display_name);
+    const status = row.loa_active ? "LOA" : row.sloa_active ? "SLOA" : "";
+    const username = member?.user.username || `Unknown user (${row.user_id})`;
+    const line = `${username}${status ? ` - ${status}` : ""}\n> ${tags.length ? tags.join(", ") : "No tags"}`;
+    if (!grouped.has(roleName)) grouped.set(roleName, { position, lines: [] });
+    grouped.get(roleName).lines.push(line);
+  }
+
+  const description = [...grouped.entries()]
+    .sort(([, a], [, b]) => b.position - a.position)
+    .map(([roleName, group]) => `### ${roleName}\n${group.lines.join("\n")}`)
+    .join("\n\n")
+    .slice(0, 4096);
+  const updatedAt = store.getStaffDirectoryUpdatedAt(guild.id);
+  const directory = embed("Configured staff", description);
+  if (updatedAt) directory.setFooter({ text: `Last updated ${stamp(updatedAt)}` });
+  return directory;
+}
 async function setLeaveNickname(member, guild, type, active) {
   if (!member || !guild) return null;
   const prefix = type === "loa" ? "LOA" : "SLOA";
@@ -825,10 +855,7 @@ add(staffCmd, "Staff", "Staff", async (i) => {
   const s = i.options.getSubcommand();
   if (s === "list") {
     if (!staff(i)) return deny(i);
-    const rows = store.listStaffStatuses(i.guildId);
-    return i.reply({
-      embeds: [embed("Configured staff", rows.length ? rows.map(staffStatusLine).join("\n") : "No staff configured.")],
-    });
+    return i.reply({ embeds: [await buildStaffDirectory(i.guild)] });
   }
   if (!manager(i)) return deny(i, "Only managers can manage staff.");
   const u = i.options.getUser("user");
@@ -853,6 +880,26 @@ add(staffCmd, "Staff", "Staff", async (i) => {
     ],
   });
 });
+add(
+  new SlashCommandBuilder()
+    .setName("tags")
+    .setDescription("List all claimable staff tags"),
+  "Tags",
+  "Everyone",
+  (i) => {
+    const tagList = store.listTags(i.guildId);
+    return i.reply({
+      embeds: [
+        embed(
+          "Claimable tags",
+          tagList.length
+            ? tagList.map((tag) => `\`${tag.display_name}\``).join(", ")
+            : "No tags are available.",
+        ),
+      ],
+    });
+  },
+);
 const tags = new SlashCommandBuilder()
   .setName("tag")
   .setDescription("Manage staff expertise")
@@ -909,13 +956,36 @@ const tags = new SlashCommandBuilder()
   );
 add(tags, "Tags", "Staff / Managers", async (i) => {
   if (!staff(i)) return deny(i);
-  const s = i.options.getSubcommand(),
-    name = i.options.getString("tag").trim().toLowerCase();
+  const s = i.options.getSubcommand();
+  const rawName = i.options.getString("tag");
+  const name = rawName?.trim().toLowerCase();
   if (["create", "delete"].includes(s) && !manager(i))
     return deny(i, "Only managers can manage available tags.");
+  if (s === "list") {
+    const tagList = store.userTags(i.guildId, i.user.id);
+    return i.reply({
+      embeds: [
+        embed(
+          "Your tags",
+          tagList.length ? tagList.map((tag) => `\`${tag.display_name}\``).join(", ") : "No tags assigned.",
+        ),
+      ],
+    });
+  }
+  if (!name) return i.reply({ content: "Please provide a tag name.", ephemeral: true });
   if (s === "create") {
-    store.tag(i.guildId, name);
+    store.tag(i.guildId, name, rawName.trim());
     return i.reply({ content: `Tag \`${name}\` created.` });
+  }
+  if (s === "delete") {
+    store.deleteTag(i.guildId, name);
+    return i.reply({ content: `Tag \`${name}\` deleted.` });
+  }
+  if (s === "add" || s === "remove") {
+    const user = i.options.getUser("user") || i.user;
+    if (s === "add") store.addStaffTag(i.guildId, name, user.id, i.user.id);
+    else store.removeStaffTag(i.guildId, name, user.id);
+    return i.reply({ content: `${s === "add" ? "Assigned" : "Removed"} tag \`${name}\` ${s === "add" ? "to" : "from"} ${user}.` });
   }
   const members = store.tagMembers(i.guildId, name);
   if (s === "ping") {
@@ -933,15 +1003,7 @@ add(tags, "Tags", "Staff / Managers", async (i) => {
         ),
       ],
     });
-  return i.reply({
-    embeds: [
-      embed(
-        "Staff tags",
-        "Tag management is guild-scoped and restricted to staff.",
-      ),
-    ],
-    ephemeral: true,
-  });
+  return i.reply({ content: "Unknown tag command.", ephemeral: true });
 });
 const claim = new SlashCommandBuilder()
   .setName("claim")
@@ -1079,6 +1141,7 @@ module.exports = {
   buildHelpRow,
   setLeaveNickname,
   staffStatusLine,
+  buildStaffDirectory,
   staffCheck,
   managerCheck,
   isBotOwner,

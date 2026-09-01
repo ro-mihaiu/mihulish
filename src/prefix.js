@@ -6,6 +6,7 @@ const {
   buildHelpRow,
   setLeaveNickname,
   staffStatusLine,
+  buildStaffDirectory,
   staffCheck,
   managerCheck,
   isBotOwner,
@@ -108,6 +109,20 @@ async function handlePrefixMessage(message) {
     user: message.author,
     channelName: message.channel?.name,
   }).catch(() => {});
+
+  if (command.name === "tags") {
+    const tagList = store.listTags(message.guild.id);
+    return reply(message, {
+      embeds: [
+        embed(
+          "Claimable tags",
+          tagList.length
+            ? tagList.map((tag) => `\`${tag.display_name}\``).join(", ")
+            : "No tags are available.",
+        ),
+      ],
+    });
+  }
 
   if (command.name === "help") {
     return reply(message, {
@@ -791,14 +806,8 @@ async function handlePrefixMessage(message) {
       if (!staffCheck(message.guild.id, message.member, message.client)) {
         return reply(message, "You must be configured staff to use this command.");
       }
-      const rows = store.listStaffStatuses(message.guild.id);
       return reply(message, {
-        embeds: [
-          embed(
-            "Configured staff",
-            rows.length ? rows.map(staffStatusLine).join("\n") : "No staff configured.",
-          ),
-        ],
+        embeds: [await buildStaffDirectory(message.guild)],
       });
     }
     if (!managerCheck(message.guild.id, message.member, message.client)) {
@@ -855,7 +864,7 @@ async function handlePrefixMessage(message) {
     if (sub === "delete") {
       if (!tagArg) return reply(message, `Usage: \`${p}tag delete <name>\``);
       const name = tagArg.trim().toLowerCase();
-      store.db.prepare("DELETE FROM tags WHERE guild_id=? AND name=?").run(message.guild.id, name);
+      store.deleteTag(message.guild.id, name);
       return reply(message, `Tag \`${name}\` deleted.`);
     }
     if (sub === "ping") {
