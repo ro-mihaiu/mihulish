@@ -1,7 +1,9 @@
 const {
   SlashCommandBuilder,
   PermissionFlagsBits,
-  EmbedBuilder,
+  ContainerBuilder,
+  TextDisplayBuilder,
+  SeparatorBuilder,
   ActionRowBuilder,
   ButtonBuilder,
   ButtonStyle,
@@ -24,10 +26,12 @@ function add(builder, category, permission, execute) {
   commands.push({ data: builder, execute });
 }
 function embed(title, description, color = COLOR) {
-  return new EmbedBuilder()
-    .setColor(color)
-    .setTitle(title)
-    .setDescription(description);
+  return new ContainerBuilder()
+    .setAccentColor(color)
+    .addTextDisplayComponents(
+      new TextDisplayBuilder().setContent(`## ${title}`),
+      new TextDisplayBuilder().setContent(description || ""),
+    );
 }
 function isBotOwner(userId, client = null) {
   if (!userId) return false;
@@ -64,8 +68,13 @@ function staff(i) {
 function manager(i) {
   return isBotOwner(i.user?.id, i.client) || managerCheck(i.guildId, i.member, i.client);
 }
+function respond(i, payload) {
+  const flags = (payload.flags || 0) | (payload.components ? 32768 : 0);
+  return i.reply({ ...payload, flags });
+}
+
 function deny(i, text = "You must be configured staff to use this command.") {
-  return i.reply({ content: text, ephemeral: true });
+  return respond(i, { content: text, ephemeral: true });
 }
 function target(i, name = "user") {
   return i.options.getMember(name) || i.options.getUser(name);
@@ -117,7 +126,10 @@ async function buildStaffDirectory(guild) {
     .slice(0, 4096);
   const updatedAt = store.getStaffDirectoryUpdatedAt(guild.id);
   const directory = embed("Configured staff", description);
-  if (updatedAt) directory.setFooter({ text: `Last updated ${stamp(updatedAt)}` });
+  if (updatedAt) {
+    directory.addSeparatorComponents(new SeparatorBuilder().setDivider(true));
+    directory.addTextDisplayComponents(new TextDisplayBuilder().setContent(`Last updated ${stamp(updatedAt)}`));
+  }
   return directory;
 }
 async function setLeaveNickname(member, guild, type, active) {
@@ -164,13 +176,15 @@ async function setLeaveNickname(member, guild, type, active) {
 }
 
 function buildHelpEmbed(prefix = "m.") {
-  const helpEmbed = new EmbedBuilder()
-    .setColor(COLOR)
-    .setTitle("Mihulish — Commands")
-    .setDescription(
-      "A dark, terminal-inspired Discord utility bot for moderation, staff management, tickets, and LOA/SLOA.\n\n" +
-      `Commands can be used via slash commands (\`/command\`) or server prefix (\`${prefix}command\`).\n` +
-      `Server prefix: \`${prefix}\``,
+  const helpEmbed = new ContainerBuilder()
+    .setAccentColor(COLOR)
+    .addTextDisplayComponents(
+      new TextDisplayBuilder().setContent("## Mihulish — Commands"),
+      new TextDisplayBuilder().setContent(
+        "A dark, terminal-inspired Discord utility bot for moderation, staff management, tickets, and LOA/SLOA.\n\n" +
+        `Commands can be used via slash commands (\`/command\`) or server prefix (\`${prefix}command\`).\n` +
+        `Server prefix: \`${prefix}\``,
+      ),
     );
 
   const categories = [
@@ -224,7 +238,9 @@ function buildHelpEmbed(prefix = "m.") {
     const value = cat.cmds
       .map((c) => `\`${c.name}\` — ${c.desc}`)
       .join("\n");
-    helpEmbed.addFields({ name: cat.name, value: value || "None", inline: false });
+    helpEmbed
+      .addSeparatorComponents(new SeparatorBuilder().setDivider(true))
+      .addTextDisplayComponents(new TextDisplayBuilder().setContent(`### ${cat.name}\n${value || "None"}`));
   }
 
   return helpEmbed;
@@ -247,9 +263,8 @@ add(
   "Everyone",
   (i) => {
     const p = store.getPrefix(i.guildId);
-    return i.reply({
-      embeds: [buildHelpEmbed(p)],
-      components: [buildHelpRow()],
+    return respond(i, {
+      components: [buildHelpEmbed(p), buildHelpRow()],
     });
   },
 );
@@ -257,8 +272,8 @@ const invite = new SlashCommandBuilder()
   .setName("invite")
   .setDescription("Get the bot invite link");
 add(invite, "Utility", "Everyone", async (i) => {
-  return i.reply({
-    embeds: [
+  return respond(i, {
+    components: [
       embed("Invite Mihulish", "Click the link below to invite me to your server.\nhttps://invite.ro-mihaiu.xyz"),
     ],
   });
@@ -269,8 +284,8 @@ const vote = new SlashCommandBuilder()
 add(vote, "Utility", "Everyone", async (i) => {
   const result = store.vote(i.guildId, i.user.id);
   if (!result.ok) {
-    return i.reply({
-      embeds: [
+    return respond(i, {
+      components: [
         embed("Vote cooldown", `You can vote again in **${result.remainingMinutes}** minute(s).\nCurrent streak: **${result.streak}** 🔥`),
       ],
       ephemeral: true,
@@ -283,8 +298,8 @@ add(vote, "Utility", "Everyone", async (i) => {
   if (result.prevVoterId && result.prevVoterId !== i.user.id) {
     desc.push(`Last vote by <@${result.prevVoterId}>`);
   }
-  return i.reply({
-    embeds: [embed("Vote recorded", desc.join("\n"))],
+  return respond(i, {
+    components: [embed("Vote recorded", desc.join("\n"))],
   });
 });
 const votes = new SlashCommandBuilder()
@@ -300,8 +315,8 @@ add(votes, "Utility", "Everyone", async (i) => {
   } else {
     desc.push("No votes yet — use `/vote` to start the streak!");
   }
-  return i.reply({
-    embeds: [embed("Server vote streak", desc.join("\n"))],
+  return respond(i, {
+    components: [embed("Server vote streak", desc.join("\n"))],
   });
 });
 const loa = new SlashCommandBuilder()
@@ -341,8 +356,8 @@ add(loa, "LOA", "Staff", async (i) => {
   if (!staff(i)) return deny(i);
   const s = i.options.getSubcommand();
   if (s === "rules")
-    return i.reply({
-      embeds: [
+    return respond(i, {
+      components: [
         embed(
           "LOA rules",
           "Use LOA when fully unavailable. Give a clear reason and an optional end date. Return to active status when available again.",
@@ -372,8 +387,8 @@ add(loa, "LOA", "Staff", async (i) => {
     const embedText = nickError
       ? `${targetUser} — ${r}\n⚠️ ${nickError}`
       : `${targetUser} — ${r}`;
-    return i.reply({
-      embeds: [embed(a ? "LOA active" : "LOA removed", embedText)],
+    return respond(i, {
+      components: [embed(a ? "LOA active" : "LOA removed", embedText)],
     });
   }
   let rows =
@@ -386,8 +401,8 @@ add(loa, "LOA", "Staff", async (i) => {
             (i.options.getUser("user") || i.user).id,
           ),
         ].filter(Boolean);
-  return i.reply({
-    embeds: [
+  return respond(i, {
+    components: [
       embed(
         "LOA status",
         rows.length
@@ -441,8 +456,8 @@ add(sloa, "SLOA", "Staff", async (i) => {
   if (!staff(i)) return deny(i);
   const s = i.options.getSubcommand();
   if (s === "rules")
-    return i.reply({
-      embeds: [
+    return respond(i, {
+      components: [
         embed(
           "SLOA rules",
           "Use SLOA when partially available. Describe your availability clearly and keep it updated.",
@@ -471,8 +486,8 @@ add(sloa, "SLOA", "Staff", async (i) => {
     const embedText = nickError
       ? `${targetUser} — ${i.options.getString("availability")}\n⚠️ ${nickError}`
       : `${targetUser} — ${i.options.getString("availability")}`;
-    return i.reply({
-      embeds: [
+    return respond(i, {
+      components: [
         embed(
           a ? "SLOA active" : "SLOA removed",
           embedText,
@@ -490,8 +505,8 @@ add(sloa, "SLOA", "Staff", async (i) => {
             (i.options.getUser("user") || i.user).id,
           ),
         ].filter(Boolean);
-  return i.reply({
-    embeds: [
+  return respond(i, {
+    components: [
       embed(
         "SLOA status",
         rows.length
@@ -536,8 +551,8 @@ add(
       moderatorId: i.user.id,
       reason: r,
     });
-    return i.reply({
-      embeds: [
+    return respond(i, {
+      components: [
         embed(
           "Warning issued",
           `${u} received warning **#${w.id}**.\nReason: ${r}`,
@@ -582,8 +597,8 @@ add(
       moderatorId: i.user.id,
       reason: w.reason,
     });
-    return i.reply({
-      embeds: [
+    return respond(i, {
+      components: [
         embed(
           "Warning removed",
           `Warning **#${id}** for ${u} was removed.\nReason was: ${w.reason}`,
@@ -615,8 +630,8 @@ for (const [name, desc] of [
           )
           .join("\n\n")
       : "No warnings found.";
-    return i.reply({
-      embeds: [
+    return respond(i, {
+      components: [
         embed(name === "warns" ? "Member warnings" : "Server warnings", text),
       ],
       ephemeral: name === "warns",
@@ -673,8 +688,8 @@ function moderation(name, perm, method, label) {
         moderatorId: i.user.id,
         reason: r,
       });
-      return i.reply({
-        embeds: [
+      return respond(i, {
+        components: [
           embed(
             `${name[0].toUpperCase() + name.slice(1)} complete`,
             `${m} was ${name}d.\nReason: ${r}`,
@@ -731,7 +746,7 @@ add(mute, "Moderation", "Moderate Members", async (i) => {
     moderatorId: i.user.id,
     reason: i.options.getString("reason") || "No reason provided",
   });
-  return i.reply({ embeds: [embed("Mute complete", `${m} was timed out.`)] });
+  return respond(i, { components: [embed("Mute complete", `${m} was timed out.`)] });
 });
 const unmute = new SlashCommandBuilder()
   .setName("unmute")
@@ -768,8 +783,8 @@ add(unmute, "Moderation", "Moderate Members", async (i) => {
     moderatorId: i.user.id,
     reason: r,
   });
-  return i.reply({
-    embeds: [embed("Unmute complete", `${m} was unmuted.\nReason: ${r}`)],
+  return respond(i, {
+    components: [embed("Unmute complete", `${m} was unmuted.\nReason: ${r}`)],
   });
 });
 const unban = new SlashCommandBuilder()
@@ -802,8 +817,8 @@ add(unban, "Moderation", "Ban Members", async (i) => {
     }
     return deny(i, `Failed to unban user: ${e.message}`);
   }
-  return i.reply({
-    embeds: [
+  return respond(i, {
+    components: [
       embed("Unban complete", `<@${u.id}> was unbanned.\nReason: ${r}`),
     ],
   });
@@ -819,8 +834,8 @@ add(bans, "Moderation", "Ban Members", async (i) => {
   )
     return deny(i, "You need Ban Members.");
   const rows = await i.guild.bans.fetch();
-  return i.reply({
-    embeds: [
+  return respond(i, {
+    components: [
       embed(
         "Server bans",
         rows.size
@@ -870,14 +885,14 @@ add(staffCmd, "Staff", "Staff", async (i) => {
   const s = i.options.getSubcommand();
   if (s === "list") {
     if (!staff(i)) return deny(i);
-    return i.reply({ embeds: [await buildStaffDirectory(i.guild)] });
+    return respond(i, { components: [await buildStaffDirectory(i.guild)] });
   }
   if (!manager(i)) return deny(i, "Only managers can manage staff.");
   const u = i.options.getUser("user");
   if (s === "remove") {
     store.removeStaff(i.guildId, u.id);
-    return i.reply({
-      embeds: [embed("Staff removed", `${u} is no longer registered staff.`)],
+    return respond(i, {
+      components: [embed("Staff removed", `${u} is no longer registered staff.`)],
     });
   }
   const role = i.options.getRole("role");
@@ -886,8 +901,8 @@ add(staffCmd, "Staff", "Staff", async (i) => {
     const m = await i.guild.members.fetch(u.id);
     if (!m.roles.cache.has(role.id)) await m.roles.add(role);
   }
-  return i.reply({
-    embeds: [
+  return respond(i, {
+    components: [
       embed(
         s === "add" ? "Staff added" : "Staff upgraded",
         `${u} is registered as staff.`,
@@ -903,8 +918,8 @@ add(
   "Everyone",
   (i) => {
     const tagList = store.listTags(i.guildId);
-    return i.reply({
-      embeds: [
+    return respond(i, {
+      components: [
         embed(
           "Claimable tags",
           tagList.length
@@ -978,8 +993,8 @@ add(tags, "Tags", "Staff / Managers", async (i) => {
     return deny(i, "Only managers can manage available tags.");
   if (s === "list") {
     const tagList = store.userTags(i.guildId, i.user.id);
-    return i.reply({
-      embeds: [
+    return respond(i, {
+      components: [
         embed(
           "Your tags",
           tagList.length ? tagList.map((tag) => `\`${tag.display_name}\``).join(", ") : "No tags assigned.",
@@ -987,38 +1002,38 @@ add(tags, "Tags", "Staff / Managers", async (i) => {
       ],
     });
   }
-  if (!name) return i.reply({ content: "Please provide a tag name.", ephemeral: true });
+  if (!name) return respond(i, { content: "Please provide a tag name.", ephemeral: true });
   if (s === "create") {
     store.tag(i.guildId, name, rawName.trim());
-    return i.reply({ content: `Tag \`${name}\` created.` });
+    return respond(i, { content: `Tag \`${name}\` created.` });
   }
   if (s === "delete") {
     store.deleteTag(i.guildId, name);
-    return i.reply({ content: `Tag \`${name}\` deleted.` });
+    return respond(i, { content: `Tag \`${name}\` deleted.` });
   }
   if (s === "add" || s === "remove") {
     const user = i.options.getUser("user") || i.user;
     if (s === "add") store.addStaffTag(i.guildId, name, user.id, i.user.id);
     else store.removeStaffTag(i.guildId, name, user.id);
-    return i.reply({ content: `${s === "add" ? "Assigned" : "Removed"} tag \`${name}\` ${s === "add" ? "to" : "from"} ${user}.` });
+    return respond(i, { content: `${s === "add" ? "Assigned" : "Removed"} tag \`${name}\` ${s === "add" ? "to" : "from"} ${user}.` });
   }
   const members = store.tagMembers(i.guildId, name);
   if (s === "ping") {
     if (!manager(i)) return deny(i, "Only managers can ping expertise tags.");
     if (!members.length)
-      return i.reply({ content: `No staff members have the \`${name}\` tag.` });
-    return i.reply({ content: members.map((id) => `<@${id}>`).join(" ") });
+      return respond(i, { content: `No staff members have the \`${name}\` tag.` });
+    return respond(i, { content: members.map((id) => `<@${id}>`).join(" ") });
   }
   if (s === "check")
-    return i.reply({
-      embeds: [
+    return respond(i, {
+      components: [
         embed(
           `Staff with ${name}`,
           members.length ? members.map((id) => `<@${id}>`).join("\n") : "None",
         ),
       ],
     });
-  return i.reply({ content: "Unknown tag command.", ephemeral: true });
+  return respond(i, { content: "Unknown tag command.", ephemeral: true });
 });
 const claim = new SlashCommandBuilder()
   .setName("claim")
@@ -1029,7 +1044,7 @@ add(claim, "Tickets", "Staff", async (i) => {
   if (!t || t.status !== "OPEN" || !t.ticket_user_id)
     return deny(i, "This is not a recognized open ticket.");
   store.assignTicket(i.guildId, i.channelId, i.user.id);
-  return i.reply({
+  return respond(i, {
     content: `<@${t.ticket_user_id}> <@${i.user.id}> has claimed this ticket.`,
     allowedMentions: { users: [t.ticket_user_id, i.user.id] },
   });
@@ -1049,7 +1064,7 @@ add(transfer, "Tickets", "Staff", async (i) => {
   if (!store.isStaff(i.guildId, u.id))
     return deny(i, "The recipient must be registered staff.");
   store.assignTicket(i.guildId, i.channelId, u.id);
-  return i.reply({
+  return respond(i, {
     content: `<@${t.ticket_user_id}> <@${u.id}> has received this ticket from <@${i.user.id}>.`,
     allowedMentions: { users: [t.ticket_user_id, u.id, i.user.id] },
   });
@@ -1067,7 +1082,7 @@ add(unclaim, "Tickets", "Staff", async (i) => {
       "Only the assigned staff member or a manager can unclaim this ticket.",
     );
   store.assignTicket(i.guildId, i.channelId, null);
-  return i.reply({
+  return respond(i, {
     content: `<@${t.ticket_user_id || "0"}> The ticket is no longer assigned.`,
     allowedMentions: { users: t.ticket_user_id ? [t.ticket_user_id] : [] },
   });
@@ -1123,8 +1138,8 @@ add(settingsCmd, "Utility", "Administrator", async (i) => {
   }
   if (!Object.keys(values).length) {
     const s = store.settings(i.guildId);
-    return i.reply({
-      embeds: [
+    return respond(i, {
+      components: [
         embed(
           "Guild settings",
           `Mute role: ${s.mute_role_id ? `<@&${s.mute_role_id}>` : "not set"}\nSupport category: ${s.support_category_id ? `<#${s.support_category_id}>` : "not set"}\nManager role: ${s.manager_role_id ? `<@&${s.manager_role_id}>` : "not set"}\nLog channel: ${s.log_channel_id ? `<#${s.log_channel_id}>` : "not set"}\nPrefix: ${s.prefix || "m."}`,
@@ -1134,8 +1149,8 @@ add(settingsCmd, "Utility", "Administrator", async (i) => {
     });
   }
   const s = store.updateSettings(i.guildId, values);
-  return i.reply({
-    embeds: [
+  return respond(i, {
+    components: [
       embed(
         "Settings updated",
         `Mute role: ${s.mute_role_id ? `<@&${s.mute_role_id}>` : "not set"}\nSupport category: ${s.support_category_id ? `<#${s.support_category_id}>` : "not set"}\nManager role: ${s.manager_role_id ? `<@&${s.manager_role_id}>` : "not set"}\nLog channel: ${s.log_channel_id ? `<#${s.log_channel_id}>` : "not set"}\nPrefix: ${s.prefix || "m."}`,
@@ -1154,6 +1169,7 @@ module.exports = {
   makeEmbed,
   buildHelpEmbed,
   buildHelpRow,
+  respond,
   setLeaveNickname,
   staffStatusLine,
   buildStaffDirectory,

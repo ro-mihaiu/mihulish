@@ -33,7 +33,8 @@ function parsePrefixMessage(message) {
 }
 
 function reply(message, payload) {
-  const options = typeof payload === "string" ? { content: payload } : payload;
+  const options = typeof payload === "string" ? { content: payload } : { ...payload };
+  if (options.components) options.flags = (options.flags || 0) | 32768;
   return message.reply(options).catch((error) => {
     console.error("[prefix] failed to reply:", error.message);
   });
@@ -113,7 +114,7 @@ async function handlePrefixMessage(message) {
   if (command.name === "tags") {
     const tagList = store.listTags(message.guild.id);
     return reply(message, {
-      embeds: [
+      components: [
         embed(
           "Claimable tags",
           tagList.length
@@ -126,8 +127,7 @@ async function handlePrefixMessage(message) {
 
   if (command.name === "help") {
     return reply(message, {
-      embeds: [buildHelpEmbed(p)],
-      components: [buildHelpRow()],
+      components: [buildHelpEmbed(p), buildHelpRow()],
     });
   }
 
@@ -152,7 +152,7 @@ async function handlePrefixMessage(message) {
     if (!key) {
       const s = store.settings(message.guild.id);
       return reply(message, {
-        embeds: [
+        components: [
           embed(
             "Guild settings",
             `Mute role: ${s.mute_role_id ? `<@&${s.mute_role_id}>` : "not set"}\nSupport category: ${s.support_category_id ? `<#${s.support_category_id}>` : "not set"}\nManager role: ${s.manager_role_id ? `<@&${s.manager_role_id}>` : "not set"}\nLog channel: ${s.log_channel_id ? `<#${s.log_channel_id}>` : "not set"}\nPrefix: ${s.prefix || "m."}`,
@@ -174,7 +174,7 @@ async function handlePrefixMessage(message) {
       }
       const s = store.updateSettings(message.guild.id, { prefix: val });
       return reply(message, {
-        embeds: [
+        components: [
           embed(
             "Settings updated",
             `Mute role: ${s.mute_role_id ? `<@&${s.mute_role_id}>` : "not set"}\nSupport category: ${s.support_category_id ? `<#${s.support_category_id}>` : "not set"}\nManager role: ${s.manager_role_id ? `<@&${s.manager_role_id}>` : "not set"}\nLog channel: ${s.log_channel_id ? `<#${s.log_channel_id}>` : "not set"}\nPrefix: ${s.prefix || "m."}`,
@@ -190,7 +190,7 @@ async function handlePrefixMessage(message) {
       }
       const s = store.updateSettings(message.guild.id, { mute_role_id: role ? role.id : null });
       return reply(message, {
-        embeds: [embed("Settings updated", `Mute role set to: ${role ? `<@&${role.id}>` : "not set"}`)],
+        components: [embed("Settings updated", `Mute role set to: ${role ? `<@&${role.id}>` : "not set"}`)],
       });
     }
 
@@ -201,7 +201,7 @@ async function handlePrefixMessage(message) {
       }
       const s = store.updateSettings(message.guild.id, { manager_role_id: role ? role.id : null });
       return reply(message, {
-        embeds: [embed("Settings updated", `Manager role set to: ${role ? `<@&${role.id}>` : "not set"}`)],
+        components: [embed("Settings updated", `Manager role set to: ${role ? `<@&${role.id}>` : "not set"}`)],
       });
     }
 
@@ -212,7 +212,7 @@ async function handlePrefixMessage(message) {
       }
       const s = store.updateSettings(message.guild.id, { support_category_id: channel ? channel.id : null });
       return reply(message, {
-        embeds: [embed("Settings updated", `Support category set to: ${channel ? `<#${channel.id}>` : "not set"}`)],
+        components: [embed("Settings updated", `Support category set to: ${channel ? `<#${channel.id}>` : "not set"}`)],
       });
     }
 
@@ -223,7 +223,7 @@ async function handlePrefixMessage(message) {
       }
       const s = store.updateSettings(message.guild.id, { log_channel_id: channel ? channel.id : null });
       return reply(message, {
-        embeds: [embed("Settings updated", `Log channel set to: ${channel ? `<#${channel.id}>` : "not set"}`)],
+        components: [embed("Settings updated", `Log channel set to: ${channel ? `<#${channel.id}>` : "not set"}`)],
       });
     }
 
@@ -235,7 +235,7 @@ async function handlePrefixMessage(message) {
 
   if (command.name === "invite") {
     return reply(message, {
-      embeds: [embed("Invite Mihulish", "Click the link below to invite me to your server.\nhttps://invite.ro-mihaiu.xyz")],
+      components: [embed("Invite Mihulish", "Click the link below to invite me to your server.\nhttps://invite.ro-mihaiu.xyz")],
     });
   }
 
@@ -243,7 +243,7 @@ async function handlePrefixMessage(message) {
     const result = store.vote(message.guild.id, message.author.id);
     if (!result.ok) {
       return reply(message, {
-        embeds: [
+        components: [
           embed("Vote cooldown", `You can vote again in **${result.remainingMinutes}** minute(s).\nCurrent streak: **${result.streak}** 🔥`),
         ],
       });
@@ -256,7 +256,7 @@ async function handlePrefixMessage(message) {
       desc.push(`Last vote by <@${result.prevVoterId}>`);
     }
     return reply(message, {
-      embeds: [embed("Vote recorded", desc.join("\n"))],
+      components: [embed("Vote recorded", desc.join("\n"))],
     });
   }
 
@@ -271,7 +271,7 @@ async function handlePrefixMessage(message) {
       desc.push("No votes yet — use `" + p + "vote` to start the streak!");
     }
     return reply(message, {
-      embeds: [embed("Server vote streak", desc.join("\n"))],
+      components: [embed("Server vote streak", desc.join("\n"))],
     });
   }
 
@@ -297,7 +297,7 @@ async function handlePrefixMessage(message) {
       reason,
     });
     return reply(message, {
-      embeds: [
+      components: [
         embed(
           "Warning issued",
           `<@${targetUser.id}> received warning **#${w.id}**.\nReason: ${reason}`,
@@ -335,7 +335,7 @@ async function handlePrefixMessage(message) {
       reason: w.reason,
     });
     return reply(message, {
-      embeds: [
+      components: [
         embed(
           "Warning removed",
           `Warning **#${id}** for <@${targetUser.id}> was removed.\nReason was: ${w.reason}`,
@@ -362,7 +362,7 @@ async function handlePrefixMessage(message) {
           .join("\n\n")
       : "No warnings found.";
     return reply(message, {
-      embeds: [embed("Member warnings", text)],
+      components: [embed("Member warnings", text)],
     });
   }
 
@@ -381,7 +381,7 @@ async function handlePrefixMessage(message) {
           .join("\n\n")
       : "No warnings found.";
     return reply(message, {
-      embeds: [embed("Server warnings", text)],
+      components: [embed("Server warnings", text)],
     });
   }
 
@@ -412,7 +412,7 @@ async function handlePrefixMessage(message) {
     }
     await targetMember.timeout(minutes * 60000, reason);
     return reply(message, {
-      embeds: [
+      components: [
         embed(
           "Mute complete",
           `<@${targetMember.id}> was timed out for ${minutes} minute(s).\nReason: ${reason}`,
@@ -454,7 +454,7 @@ async function handlePrefixMessage(message) {
       reason,
     });
     return reply(message, {
-      embeds: [
+      components: [
         embed(
           "Unmute complete",
           `<@${targetMember.id}> was unmuted.\nReason: ${reason}`,
@@ -497,7 +497,7 @@ async function handlePrefixMessage(message) {
       reason,
     });
     return reply(message, {
-      embeds: [
+      components: [
         embed("Kick complete", `<@${targetMember.id}> was kicked.\nReason: ${reason}`),
       ],
     });
@@ -544,7 +544,7 @@ async function handlePrefixMessage(message) {
         reason,
       });
       return reply(message, {
-        embeds: [
+        components: [
           embed("Softban complete", `<@${targetUser.id}> was softbanned.\nReason: ${reason}`),
         ],
       });
@@ -557,7 +557,7 @@ async function handlePrefixMessage(message) {
         reason,
       });
       return reply(message, {
-        embeds: [
+        components: [
           embed("Ban complete", `<@${targetUser.id}> was banned.\nReason: ${reason}`),
         ],
       });
@@ -592,7 +592,7 @@ async function handlePrefixMessage(message) {
       return reply(message, `Failed to unban user: ${e.message}`);
     }
     return reply(message, {
-      embeds: [
+      components: [
         embed(
           "Unban complete",
           `<@${targetUser.id}> was unbanned.\nReason: ${reason}`,
@@ -610,7 +610,7 @@ async function handlePrefixMessage(message) {
     }
     const rows = await message.guild.bans.fetch();
     return reply(message, {
-      embeds: [
+      components: [
         embed(
           "Server bans",
           rows.size
@@ -631,7 +631,7 @@ async function handlePrefixMessage(message) {
     const [sub, ...args] = command.arguments;
     if (sub === "rules") {
       return reply(message, {
-        embeds: [
+        components: [
           embed(
             "LOA rules",
             "Use LOA when fully unavailable. Give a clear reason and an optional end date. Return to active status when available again.",
@@ -669,7 +669,7 @@ async function handlePrefixMessage(message) {
         ? `<@${message.author.id}> — ${reason || (active ? "LOA" : "Returned")}\n⚠️ ${nickError}`
         : `<@${message.author.id}> — ${reason || (active ? "LOA" : "Returned")}`;
       return reply(message, {
-        embeds: [embed(active ? "LOA active" : "LOA removed", embedText)],
+        components: [embed(active ? "LOA active" : "LOA removed", embedText)],
       });
     }
     if (sub === "check") {
@@ -678,7 +678,7 @@ async function handlePrefixMessage(message) {
       if (!targetUser) return reply(message, "User not found.");
       const row = store.getLeave("loa", message.guild.id, targetUser.id);
       return reply(message, {
-        embeds: [
+        components: [
           embed(
             "LOA status",
             row && row.active
@@ -691,7 +691,7 @@ async function handlePrefixMessage(message) {
     if (sub === "list") {
       const rows = store.listLeave("loa", message.guild.id);
       return reply(message, {
-        embeds: [
+        components: [
           embed(
             "LOA status",
             rows.length
@@ -716,7 +716,7 @@ async function handlePrefixMessage(message) {
     const [sub, ...args] = command.arguments;
     if (sub === "rules") {
       return reply(message, {
-        embeds: [
+        components: [
           embed(
             "SLOA rules",
             "Use SLOA when partially available. Describe your availability clearly and keep it updated.",
@@ -763,7 +763,7 @@ async function handlePrefixMessage(message) {
         ? `<@${message.author.id}> — ${availability}\n⚠️ ${nickError}`
         : `<@${message.author.id}> — ${availability}`;
       return reply(message, {
-        embeds: [embed(active ? "SLOA active" : "SLOA removed", embedText)],
+        components: [embed(active ? "SLOA active" : "SLOA removed", embedText)],
       });
     }
     if (sub === "check") {
@@ -772,7 +772,7 @@ async function handlePrefixMessage(message) {
       if (!targetUser) return reply(message, "User not found.");
       const row = store.getLeave("sloa", message.guild.id, targetUser.id);
       return reply(message, {
-        embeds: [
+        components: [
           embed(
             "SLOA status",
             row && row.active
@@ -785,7 +785,7 @@ async function handlePrefixMessage(message) {
     if (sub === "list") {
       const rows = store.listLeave("sloa", message.guild.id);
       return reply(message, {
-        embeds: [
+        components: [
           embed(
             "SLOA status",
             rows.length
@@ -807,7 +807,7 @@ async function handlePrefixMessage(message) {
         return reply(message, "You must be configured staff to use this command.");
       }
       return reply(message, {
-        embeds: [await buildStaffDirectory(message.guild)],
+        components: [await buildStaffDirectory(message.guild)],
       });
     }
     if (!managerCheck(message.guild.id, message.member, message.client)) {
@@ -818,7 +818,7 @@ async function handlePrefixMessage(message) {
       if (!targetUser) return reply(message, `Usage: \`${p}staff remove <@user|id>\``);
       store.removeStaff(message.guild.id, targetUser.id);
       return reply(message, {
-        embeds: [embed("Staff removed", `<@${targetUser.id}> is no longer registered staff.`)],
+        components: [embed("Staff removed", `<@${targetUser.id}> is no longer registered staff.`)],
       });
     }
     if (sub === "add" || sub === "upgrade") {
@@ -835,7 +835,7 @@ async function handlePrefixMessage(message) {
         }
       }
       return reply(message, {
-        embeds: [
+        components: [
           embed(
             sub === "add" ? "Staff added" : "Staff upgraded",
             `<@${targetUser.id}> is registered as staff.`,
@@ -879,7 +879,7 @@ async function handlePrefixMessage(message) {
       const name = tagArg.trim().toLowerCase();
       const members = store.tagMembers(message.guild.id, name);
       return reply(message, {
-        embeds: [
+        components: [
           embed(
             `Staff with ${name}`,
             members.length ? members.map((id) => `<@${id}>`).join("\n") : "None",
@@ -908,7 +908,7 @@ async function handlePrefixMessage(message) {
       if (!targetUser) return reply(message, "User not found.");
       const tagsList = store.userTags(message.guild.id, targetUser.id);
       return reply(message, {
-        embeds: [
+        components: [
           embed(
             `Tags for ${targetUser.username}`,
             tagsList.length ? tagsList.map((t) => `\`${t.name}\``).join(", ") : "No tags assigned.",

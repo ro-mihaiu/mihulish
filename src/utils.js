@@ -1,10 +1,21 @@
-const { EmbedBuilder } = require("discord.js");
+const { ContainerBuilder, TextDisplayBuilder, SeparatorBuilder } = require("discord.js");
 const store = require("./database");
 
 const COLOR = 0xe91e63;
 
-function makeEmbed() {
-  return new EmbedBuilder().setColor(COLOR);
+function makeEmbed(title, description) {
+  return new ContainerBuilder()
+    .setAccentColor(COLOR)
+    .addTextDisplayComponents(
+      new TextDisplayBuilder().setContent(`## ${title}`),
+      new TextDisplayBuilder().setContent(description),
+      new SeparatorBuilder().setDivider(true),
+      new TextDisplayBuilder().setContent(`Logged <t:${Math.floor(Date.now() / 1000)}:F>`),
+    );
+}
+
+function v2Payload(title, description) {
+  return { components: [makeEmbed(title, description)], flags: 32768 };
 }
 
 async function getLogChannel(guildId, client) {
@@ -29,9 +40,7 @@ async function logCommand(guildId, client, { command, input = "", user, channelN
       `**Channel:** ${channelName}`,
       `**Time:** <t:${Math.floor(Date.now() / 1000)}:F>`,
     ].join("\n");
-    await ch.send({
-      embeds: [makeEmbed().setTitle("📜 Command Log").setDescription(description).setTimestamp()],
-    });
+    await ch.send(v2Payload("Command Log", description));
   } catch (error) {
     console.error("Failed to log command:", error);
   }
@@ -41,9 +50,7 @@ async function logEvent(guildId, client, { title, description }) {
   const ch = await getLogChannel(guildId, client);
   if (!ch) return;
   try {
-    await ch.send({
-      embeds: [makeEmbed().setTitle(title).setDescription(description).setTimestamp()],
-    });
+    await ch.send(v2Payload(title, description));
   } catch (error) {
     console.error("Failed to log event:", error);
   }
@@ -61,9 +68,7 @@ async function logModeration(guildId, client, { action, targetId, moderatorId, r
       `**Reason:** ${reason || "No reason provided"}`,
       `**Time:** <t:${Math.floor(Date.now() / 1000)}:F>`,
     ].join("\n");
-    await ch.send({
-      embeds: [makeEmbed().setTitle("🛡️ Moderation Log").setDescription(desc).setTimestamp()],
-    });
+    await ch.send(v2Payload("Moderation Log", desc));
   } catch (error) {
     console.error("Failed to log moderation:", error);
   }
