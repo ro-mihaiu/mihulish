@@ -1,9 +1,7 @@
 const {
   SlashCommandBuilder,
   PermissionFlagsBits,
-  ContainerBuilder,
-  TextDisplayBuilder,
-  SeparatorBuilder,
+  EmbedBuilder,
   ActionRowBuilder,
   ButtonBuilder,
   ButtonStyle,
@@ -26,12 +24,21 @@ function add(builder, category, permission, execute) {
   commands.push({ data: builder, execute });
 }
 function embed(title, description, color = COLOR) {
-  return new ContainerBuilder()
-    .setAccentColor(color)
-    .addTextDisplayComponents(
-      new TextDisplayBuilder().setContent(`## ${title}`),
-      new TextDisplayBuilder().setContent(description || ""),
-    );
+  return new EmbedBuilder()
+    .setColor(color)
+    .setTitle(String(title ?? "Mihulish"))
+    .setDescription(String(description ?? "No details provided."));
+}
+
+function normalizeResponse(payload) {
+  const response = { ...payload };
+  if (!response.components) return response;
+  const embeds = response.components.filter((component) => component instanceof EmbedBuilder);
+  const components = response.components.filter((component) => !(component instanceof EmbedBuilder));
+  delete response.components;
+  if (embeds.length) response.embeds = [...(response.embeds || []), ...embeds];
+  if (components.length) response.components = components;
+  return response;
 }
 function isBotOwner(userId, client = null) {
   if (!userId) return false;
@@ -69,8 +76,7 @@ function manager(i) {
   return isBotOwner(i.user?.id, i.client) || managerCheck(i.guildId, i.member, i.client);
 }
 function respond(i, payload) {
-  const flags = (payload.flags || 0) | (payload.components ? 32768 : 0);
-  const response = { ...payload, flags };
+  const response = normalizeResponse(payload);
   if (i.deferred) return i.editReply(response);
   if (i.replied) return i.followUp(response);
   return i.reply(response);
@@ -129,10 +135,7 @@ async function buildStaffDirectory(guild) {
     .slice(0, 4096);
   const updatedAt = store.getStaffDirectoryUpdatedAt(guild.id);
   const directory = embed("Configured staff", description);
-  if (updatedAt) {
-    directory.addSeparatorComponents(new SeparatorBuilder().setDivider(true));
-    directory.addTextDisplayComponents(new TextDisplayBuilder().setContent(`Last updated ${stamp(updatedAt)}`));
-  }
+  if (updatedAt) directory.setFooter({ text: `Last updated ${stamp(updatedAt)}` });
   return directory;
 }
 async function setLeaveNickname(member, guild, type, active) {
@@ -179,15 +182,13 @@ async function setLeaveNickname(member, guild, type, active) {
 }
 
 function buildHelpEmbed(prefix = "m.") {
-  const helpEmbed = new ContainerBuilder()
-    .setAccentColor(COLOR)
-    .addTextDisplayComponents(
-      new TextDisplayBuilder().setContent("## Mihulish — Commands"),
-      new TextDisplayBuilder().setContent(
-        "A dark, terminal-inspired Discord utility bot for moderation, staff management, tickets, and LOA/SLOA.\n\n" +
-        `Commands can be used via slash commands (\`/command\`) or server prefix (\`${prefix}command\`).\n` +
-        `Server prefix: \`${prefix}\``,
-      ),
+  const helpEmbed = new EmbedBuilder()
+    .setColor(COLOR)
+    .setTitle("Mihulish - Commands")
+    .setDescription(
+      "A dark, terminal-inspired Discord utility bot for moderation, staff management, tickets, and LOA/SLOA.\n\n" +
+      `Commands can be used via slash commands (\`/command\`) or server prefix (\`${prefix}command\`).\n` +
+      `Server prefix: \`${prefix}\``,
     );
 
   const categories = [
@@ -241,9 +242,10 @@ function buildHelpEmbed(prefix = "m.") {
     const value = cat.cmds
       .map((c) => `\`${c.name}\` — ${c.desc}`)
       .join("\n");
-    helpEmbed
-      .addSeparatorComponents(new SeparatorBuilder().setDivider(true))
-      .addTextDisplayComponents(new TextDisplayBuilder().setContent(`### ${cat.name}\n${value || "None"}`));
+    helpEmbed.addFields({
+      name: cat.name,
+      value: value || "None",
+    });
   }
 
   return helpEmbed;

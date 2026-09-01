@@ -34,7 +34,11 @@ function parsePrefixMessage(message) {
 
 function reply(message, payload) {
   const options = typeof payload === "string" ? { content: payload } : { ...payload };
-  if (options.components) options.flags = (options.flags || 0) | 32768;
+  if (options.components) {
+    options.embeds = options.components.filter((component) => component.data?.title);
+    options.components = options.components.filter((component) => !component.data?.title);
+    if (!options.components.length) delete options.components;
+  }
   return message.reply(options).catch((error) => {
     console.error("[prefix] failed to reply:", error.message);
   });

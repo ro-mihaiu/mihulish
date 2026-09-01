@@ -1,23 +1,18 @@
-const { ContainerBuilder, TextDisplayBuilder, SeparatorBuilder } = require("discord.js");
+const { EmbedBuilder } = require("discord.js");
 const store = require("./database");
 
 const COLOR = 0xe91e63;
 
 function makeEmbed(title, description) {
-  const safeTitle = String(title ?? "Mihulish Log");
-  const safeDescription = String(description ?? "No details provided.");
-  return new ContainerBuilder()
-    .setAccentColor(COLOR)
-    .addTextDisplayComponents(
-      new TextDisplayBuilder().setContent(`## ${safeTitle}`),
-      new TextDisplayBuilder().setContent(safeDescription),
-      new SeparatorBuilder().setDivider(true),
-      new TextDisplayBuilder().setContent(`Logged <t:${Math.floor(Date.now() / 1000)}:F>`),
-    );
+  return new EmbedBuilder()
+    .setColor(COLOR)
+    .setTitle(String(title ?? "Mihulish Log"))
+    .setDescription(String(description ?? "No details provided."))
+    .setTimestamp();
 }
 
-function v2Payload(title, description) {
-  return { components: [makeEmbed(title, description)], flags: 32768 };
+function embedPayload(title, description) {
+  return { embeds: [makeEmbed(title, description)] };
 }
 
 async function getLogChannel(guildId, client) {
@@ -42,7 +37,7 @@ async function logCommand(guildId, client, { command, input = "", user, channelN
       `**Channel:** ${channelName}`,
       `**Time:** <t:${Math.floor(Date.now() / 1000)}:F>`,
     ].join("\n");
-    await ch.send(v2Payload("Command Log", description));
+    await ch.send(embedPayload("Command Log", description));
   } catch (error) {
     console.error("Failed to log command:", error);
   }
@@ -52,7 +47,7 @@ async function logEvent(guildId, client, { title = "Event Log", description = "N
   const ch = await getLogChannel(guildId, client);
   if (!ch) return;
   try {
-    await ch.send(v2Payload(title, description));
+    await ch.send(embedPayload(title, description));
   } catch (error) {
     console.error("Failed to log event:", error);
   }
@@ -70,7 +65,7 @@ async function logModeration(guildId, client, { action, targetId, moderatorId, r
       `**Reason:** ${reason || "No reason provided"}`,
       `**Time:** <t:${Math.floor(Date.now() / 1000)}:F>`,
     ].join("\n");
-    await ch.send(v2Payload("Moderation Log", desc));
+    await ch.send(embedPayload("Moderation Log", desc));
   } catch (error) {
     console.error("Failed to log moderation:", error);
   }
