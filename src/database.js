@@ -271,7 +271,7 @@ function assignTicket(g, c, u) {
   return ticket(g, c);
 }
 function updateTicketLastMessage(g, c) {
-  db.prepare("UPDATE tickets SET last_message_at=? WHERE guild_id=? AND channel_id=?", Date.now(), g, c);
+  db.prepare("UPDATE tickets SET last_message_at=? WHERE guild_id=? AND channel_id=?").run(Date.now(), g, c);
 }
 function deleteTicket(g, c) {
   db.prepare("DELETE FROM tickets WHERE guild_id=? AND channel_id=?").run(g, c);
