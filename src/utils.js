@@ -71,4 +71,24 @@ async function logModeration(guildId, client, { action, targetId, moderatorId, r
   }
 }
 
-module.exports = { makeEmbed, logCommand, logEvent, logModeration };
+async function sendDM(userId, client, title, description) {
+  if (!userId || !client) return false;
+  try {
+    const user = await client.users.fetch(userId);
+    if (!user) return false;
+    await user.send({
+      embeds: [
+        new EmbedBuilder()
+          .setColor(COLOR)
+          .setTitle(String(title ?? "Mihulish"))
+          .setDescription(String(description ?? "No details provided."))
+          .setTimestamp(),
+      ],
+    });
+    return true;
+  } catch (error) {
+    return false;
+  }
+}
+
+module.exports = { makeEmbed, logCommand, logEvent, logModeration, sendDM };

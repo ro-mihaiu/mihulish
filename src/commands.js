@@ -7,7 +7,7 @@ const {
   ButtonStyle,
 } = require("discord.js");
 const store = require("./database");
-const { makeEmbed, logCommand, logEvent, logModeration } = require("./utils");
+const { makeEmbed, logCommand, logEvent, logModeration, sendDM } = require("./utils");
 const COLOR = 0xe91e63;
 const DOCS = "https://mihulish.ro-mihaiu.xyz";
 const metadata = [];
@@ -231,6 +231,7 @@ function buildHelpEmbed(prefix = "m.") {
         { name: "help", desc: "Learn about Mihulish and show all commands" },
         { name: "prefix", desc: "Check current server prefix" },
         { name: "settings", desc: "View or configure server roles, channels, and prefix" },
+        { name: "link", desc: "Set an appeal link" },
         { name: "invite", desc: "Get the bot invite link" },
         { name: "vote", desc: "Vote for this server and grow the streak" },
         { name: "votes", desc: "View the server vote streak" },
@@ -556,6 +557,10 @@ add(
       moderatorId: i.user.id,
       reason: r,
     });
+    sendDM(i.user.id, i.client, "Warning Issued", `You issued warning **#${w.id}** to <@${u.id}> in **${i.guild.name}**.\nReason: ${r}`).catch(() => {});
+    const appealLink = store.getAppealLink(i.guildId);
+    const modDesc = `You received warning **#${w.id}** in **${i.guild.name}**.\nReason: ${r}${appealLink ? `\nAppeal: ${appealLink}` : ""}`;
+    sendDM(u.id, i.client, "Warning Received", modDesc).catch(() => {});
     return respond(i, {
       components: [
         embed(
@@ -693,6 +698,10 @@ function moderation(name, perm, method, label) {
         moderatorId: i.user.id,
         reason: r,
       });
+      sendDM(i.user.id, i.client, `${name[0].toUpperCase() + name.slice(1)} Complete`, `You ${name}ned <@${m.id}> in **${i.guild.name}**.\nReason: ${r}`).catch(() => {});
+      const appealLink = store.getAppealLink(i.guildId);
+      const modDesc = `You were ${name}ned from **${i.guild.name}**.\nReason: ${r}${appealLink ? `\nAppeal: ${appealLink}` : ""}`;
+      sendDM(m.id, i.client, `${name[0].toUpperCase() + name.slice(1)}`, modDesc).catch(() => {});
       return respond(i, {
         components: [
           embed(
@@ -751,6 +760,11 @@ add(mute, "Moderation", "Moderate Members", async (i) => {
     moderatorId: i.user.id,
     reason: i.options.getString("reason") || "No reason provided",
   });
+  const muteReason = i.options.getString("reason") || "No reason provided";
+  sendDM(i.user.id, i.client, "Mute Complete", `You muted <@${m.id}> in **${i.guild.name}**.\nReason: ${muteReason}`).catch(() => {});
+  const appealLink = store.getAppealLink(i.guildId);
+  const muteTargetDesc = `You were muted in **${i.guild.name}**.\nReason: ${muteReason}${appealLink ? `\nAppeal: ${appealLink}` : ""}`;
+  sendDM(m.id, i.client, "Muted", muteTargetDesc).catch(() => {});
   return respond(i, { components: [embed("Mute complete", `${m} was timed out.`)] });
 });
 const unmute = new SlashCommandBuilder()
@@ -788,6 +802,8 @@ add(unmute, "Moderation", "Moderate Members", async (i) => {
     moderatorId: i.user.id,
     reason: r,
   });
+  sendDM(i.user.id, i.client, "Unmute Complete", `You unmuted <@${m.id}> in **${i.guild.name}**.\nReason: ${r}`).catch(() => {});
+  sendDM(m.id, i.client, "Unmuted", `You were unmuted in **${i.guild.name}**.\nReason: ${r}`).catch(() => {});
   return respond(i, {
     components: [embed("Unmute complete", `${m} was unmuted.\nReason: ${r}`)],
   });
@@ -816,6 +832,8 @@ add(unban, "Moderation", "Ban Members", async (i) => {
       moderatorId: i.user.id,
       reason: r,
     });
+    sendDM(i.user.id, i.client, "Unban Complete", `You unbanned <@${u.id}> in **${i.guild.name}**.\nReason: ${r}`).catch(() => {});
+    sendDM(u.id, i.client, "Unbanned", `You were unbanned from **${i.guild.name}**.\nReason: ${r}`).catch(() => {});
   } catch (e) {
     if (e.code === 10026) {
       return deny(i, "That user is not banned.");
@@ -1018,8 +1036,13 @@ add(tags, "Tags", "Staff / Managers", async (i) => {
   }
   if (s === "add" || s === "remove") {
     const user = i.options.getUser("user") || i.user;
-    if (s === "add") store.addStaffTag(i.guildId, name, user.id, i.user.id);
-    else store.removeStaffTag(i.guildId, name, user.id);
+    if (s === "add") {
+      store.addStaffTag(i.guildId, name, user.id, i.user.id);
+      sendDM(user.id, i.client, "Tag Assigned", `You have been assigned the tag **${name}** in **${i.guild.name}**.`).catch(() => {});
+    } else {
+      store.removeStaffTag(i.guildId, name, user.id);
+      sendDM(user.id, i.client, "Tag Removed", `You have been removed from the tag **${name}** in **${i.guild.name}**.`).catch(() => {});
+    }
     return respond(i, { content: `${s === "add" ? "Assigned" : "Removed"} tag \`${name}\` ${s === "add" ? "to" : "from"} ${user}.` });
   }
   const members = store.tagMembers(i.guildId, name);
@@ -1027,7 +1050,17 @@ add(tags, "Tags", "Staff / Managers", async (i) => {
     if (!manager(i)) return deny(i, "Only managers can ping expertise tags.");
     if (!members.length)
       return respond(i, { content: `No staff members have the \`${name}\` tag.` });
-    return respond(i, { content: members.map((id) => `<@${id}>`).join(" ") });
+    const tagDisplay = store.listTags(i.guildId).find((t) => t.name === name)?.display_name || name;
+    const row = new ActionRowBuilder().addComponents(
+      new ButtonBuilder()
+        .setLabel("Claim ticket")
+        .setStyle(ButtonStyle.Primary)
+        .setCustomId(`claim_ticket_${i.channelId}`),
+    );
+    return respond(i, {
+      content: `**${tagDisplay}** staffs: ${members.map((id) => `<@${id}>`).join(", ")}`,
+      components: [row],
+    });
   }
   if (s === "check")
     return respond(i, {
@@ -1049,6 +1082,7 @@ add(claim, "Tickets", "Staff", async (i) => {
   if (!t || t.status !== "OPEN" || !t.ticket_user_id)
     return deny(i, "This is not a recognized open ticket.");
   store.assignTicket(i.guildId, i.channelId, i.user.id);
+  sendDM(i.user.id, i.client, "Ticket Assigned", `You claimed ticket **${t.panel}** in **${i.guild.name}**.`).catch(() => {});
   return respond(i, {
     content: `<@${t.ticket_user_id}> <@${i.user.id}> has claimed this ticket.`,
     allowedMentions: { users: [t.ticket_user_id, i.user.id] },
@@ -1069,6 +1103,7 @@ add(transfer, "Tickets", "Staff", async (i) => {
   if (!store.isStaff(i.guildId, u.id))
     return deny(i, "The recipient must be registered staff.");
   store.assignTicket(i.guildId, i.channelId, u.id);
+  sendDM(u.id, i.client, "Ticket Transferred", `You received ticket **${t.panel}** in **${i.guild.name}** from <@${i.user.id}>.`).catch(() => {});
   return respond(i, {
     content: `<@${t.ticket_user_id}> <@${u.id}> has received this ticket from <@${i.user.id}>.`,
     allowedMentions: { users: [t.ticket_user_id, u.id, i.user.id] },
@@ -1091,6 +1126,30 @@ add(unclaim, "Tickets", "Staff", async (i) => {
     content: `<@${t.ticket_user_id || "0"}> The ticket is no longer assigned.`,
     allowedMentions: { users: t.ticket_user_id ? [t.ticket_user_id] : [] },
   });
+});
+
+const link = new SlashCommandBuilder()
+  .setName("link")
+  .setDescription("Set an appeal link")
+  .addStringOption((o) =>
+    o
+      .setName("type")
+      .setDescription("Link type")
+      .setRequired(true)
+      .addChoices({ name: "appeal", value: "appeal" }),
+  )
+  .addStringOption((o) =>
+    o.setName("link").setDescription("The URL").setRequired(true),
+  );
+add(link, "Utility", "Manager", async (i) => {
+  if (!manager(i)) return deny(i, "Only managers can set links.");
+  const type = i.options.getString("type");
+  const url = i.options.getString("link");
+  if (type === "appeal") {
+    store.updateSettings(i.guildId, { appeal_link: url });
+    return respond(i, { content: `Appeal link set to: ${url}` });
+  }
+  return respond(i, { content: "Unknown link type.", ephemeral: true });
 });
 
 const settingsCmd = new SlashCommandBuilder()
@@ -1147,7 +1206,7 @@ add(settingsCmd, "Utility", "Administrator", async (i) => {
       components: [
         embed(
           "Guild settings",
-          `Mute role: ${s.mute_role_id ? `<@&${s.mute_role_id}>` : "not set"}\nSupport category: ${s.support_category_id ? `<#${s.support_category_id}>` : "not set"}\nManager role: ${s.manager_role_id ? `<@&${s.manager_role_id}>` : "not set"}\nLog channel: ${s.log_channel_id ? `<#${s.log_channel_id}>` : "not set"}\nPrefix: ${s.prefix || "m."}`,
+          `Mute role: ${s.mute_role_id ? `<@&${s.mute_role_id}>` : "not set"}\nSupport category: ${s.support_category_id ? `<#${s.support_category_id}>` : "not set"}\nManager role: ${s.manager_role_id ? `<@&${s.manager_role_id}>` : "not set"}\nLog channel: ${s.log_channel_id ? `<#${s.log_channel_id}>` : "not set"}\nPrefix: ${s.prefix || "m."}\nAppeal link: ${s.appeal_link || "not set"}`,
         ),
       ],
       ephemeral: true,
@@ -1155,13 +1214,13 @@ add(settingsCmd, "Utility", "Administrator", async (i) => {
   }
   const s = store.updateSettings(i.guildId, values);
   return respond(i, {
-    components: [
-      embed(
-        "Settings updated",
-        `Mute role: ${s.mute_role_id ? `<@&${s.mute_role_id}>` : "not set"}\nSupport category: ${s.support_category_id ? `<#${s.support_category_id}>` : "not set"}\nManager role: ${s.manager_role_id ? `<@&${s.manager_role_id}>` : "not set"}\nLog channel: ${s.log_channel_id ? `<#${s.log_channel_id}>` : "not set"}\nPrefix: ${s.prefix || "m."}`,
-      ),
-    ],
-  });
+      components: [
+        embed(
+          "Settings updated",
+          `Mute role: ${s.mute_role_id ? `<@&${s.mute_role_id}>` : "not set"}\nSupport category: ${s.support_category_id ? `<#${s.support_category_id}>` : "not set"}\nManager role: ${s.manager_role_id ? `<@&${s.manager_role_id}>` : "not set"}\nLog channel: ${s.log_channel_id ? `<#${s.log_channel_id}>` : "not set"}\nPrefix: ${s.prefix || "m."}\nAppeal link: ${s.appeal_link || "not set"}`,
+        ),
+      ],
+    });
 });
 
 module.exports = {
@@ -1185,4 +1244,5 @@ module.exports = {
   logCommand,
   logEvent,
   logModeration,
+  sendDM,
 };

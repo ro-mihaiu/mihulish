@@ -8,7 +8,7 @@ const {
 } = require("discord.js");
 const { commands, store } = require("./commands");
 const { handlePrefixMessage } = require("./prefix");
-const { logCommand, logEvent } = require("./commands");
+const { logCommand, logEvent, sendDM } = require("./commands");
 
 const client = new Client({
   intents: [
@@ -84,6 +84,62 @@ async function inspectTicket(channel) {
 client.on(Events.ChannelCreate, inspectTicket);
 client.on(Events.ChannelUpdate, (_old, next) => inspectTicket(next));
 client.on(Events.MessageCreate, handlePrefixMessage);
+
+client.on(Events.MessageCreate, async (message) => {
+  if (message.author.bot || !message.guild) return;
+  const s = store.settings(message.guild.id);
+  if (!s?.support_category_id || message.channel?.parentId !== s.support_category_id) return;
+  const name = message.channel.name.toLowerCase();
+  const panel = store.db
+    .prepare(
+      "SELECT panel FROM ticket_panels WHERE guild_id=? AND enabled=1 AND ? LIKE panel||'-%' ORDER BY length(panel) DESC LIMIT 1",
+    )
+    .get(message.guild.id, name)?.panel;
+  if (!panel) return;
+  const ticket = store.ticket(message.guild.id, message.channel.id);
+  if (ticket && ticket.status === "OPEN") {
+    store.updateTicketLastMessage(message.guild.id, message.channel.id);
+  }
+});
+
+async function checkTicketReminders() {
+  for (const guild of client.guilds.cache.values()) {
+    const rows = store.db
+      .prepare("SELECT * FROM tickets WHERE guild_id=? AND status='OPEN' AND ticket_user_id IS NOT NULL")
+      .all(guild.id);
+    const now = Date.now();
+    for (const t of rows) {
+      const lastMsg = t.last_message_at || t.created_at;
+      if (now - lastMsg < 24 * 60 * 60 * 1000) continue;
+      const channel = guild.channels.cache.get(t.channel_id);
+      if (!channel || !channel.isTextBased()) continue;
+      const messages = await channel.messages.fetch({ limit: 10 }).catch(() => null);
+      if (!messages) continue;
+      const sorted = messages.sort((a, b) => b.createdTimestamp - a.createdTimestamp);
+      const lastStaff = sorted.find((m) => !m.author.bot && store.isStaff(guild.id, m.author.id));
+      const lastAuthor = sorted[0]?.author;
+      const pingTargets = [];
+      if (t.ticket_user_id) pingTargets.push(t.ticket_user_id);
+      if (lastStaff && store.isStaff(guild.id, lastStaff.author.id) && lastStaff.author.id !== t.ticket_user_id) {
+        pingTargets.push(lastStaff.author.id);
+      }
+      if (!pingTargets.length) continue;
+      const uniquePings = [...new Set(pingTargets)];
+      const pingContent = uniquePings.map((id) => `<@${id}>`).join(" ");
+      try {
+        await channel.send({
+          content: `${pingContent} — This ticket has been inactive for 24 hours.`,
+          allowedMentions: { users: uniquePings },
+        });
+        store.db.prepare("UPDATE tickets SET last_message_at=? WHERE guild_id=? AND channel_id=?").run(now, guild.id, t.channel_id);
+      } catch {
+        // ignore send errors
+      }
+    }
+  }
+}
+
+setInterval(checkTicketReminders, 5 * 60 * 1000);
 
 client.on(Events.InteractionCreate, async (i) => {
   if (!i.isChatInputCommand() || !i.guildId) return;

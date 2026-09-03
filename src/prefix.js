@@ -13,6 +13,7 @@ const {
   stamp,
   logCommand,
   logModeration,
+  sendDM,
 } = require("./commands");
 
 const DEFAULT_PREFIX = "m.";
@@ -156,12 +157,12 @@ async function handlePrefixMessage(message) {
     if (!key) {
       const s = store.settings(message.guild.id);
       return reply(message, {
-        components: [
-          embed(
-            "Guild settings",
-            `Mute role: ${s.mute_role_id ? `<@&${s.mute_role_id}>` : "not set"}\nSupport category: ${s.support_category_id ? `<#${s.support_category_id}>` : "not set"}\nManager role: ${s.manager_role_id ? `<@&${s.manager_role_id}>` : "not set"}\nLog channel: ${s.log_channel_id ? `<#${s.log_channel_id}>` : "not set"}\nPrefix: ${s.prefix || "m."}`,
-          ),
-        ],
+      components: [
+        embed(
+          "Guild settings",
+          `Mute role: ${s.mute_role_id ? `<@&${s.mute_role_id}>` : "not set"}\nSupport category: ${s.support_category_id ? `<#${s.support_category_id}>` : "not set"}\nManager role: ${s.manager_role_id ? `<@&${s.manager_role_id}>` : "not set"}\nLog channel: ${s.log_channel_id ? `<#${s.log_channel_id}>` : "not set"}\nPrefix: ${s.prefix || "m."}\nAppeal link: ${s.appeal_link || "not set"}`,
+        ),
+      ],
       });
     }
 
@@ -181,7 +182,7 @@ async function handlePrefixMessage(message) {
         components: [
           embed(
             "Settings updated",
-            `Mute role: ${s.mute_role_id ? `<@&${s.mute_role_id}>` : "not set"}\nSupport category: ${s.support_category_id ? `<#${s.support_category_id}>` : "not set"}\nManager role: ${s.manager_role_id ? `<@&${s.manager_role_id}>` : "not set"}\nLog channel: ${s.log_channel_id ? `<#${s.log_channel_id}>` : "not set"}\nPrefix: ${s.prefix || "m."}`,
+            `Mute role: ${s.mute_role_id ? `<@&${s.mute_role_id}>` : "not set"}\nSupport category: ${s.support_category_id ? `<#${s.support_category_id}>` : "not set"}\nManager role: ${s.manager_role_id ? `<@&${s.manager_role_id}>` : "not set"}\nLog channel: ${s.log_channel_id ? `<#${s.log_channel_id}>` : "not set"}\nPrefix: ${s.prefix || "m."}\nAppeal link: ${s.appeal_link || "not set"}`,
           ),
         ],
       });
@@ -235,6 +236,22 @@ async function handlePrefixMessage(message) {
       message,
       `Unknown setting key \`${key}\`. Valid keys: \`prefix\`, \`mute_role\`, \`manager_role\`, \`support_category\`, \`log_channel\`.`,
     );
+  }
+
+  if (command.name === "link") {
+    if (!managerCheck(message.guild.id, message.member, message.client)) {
+      return reply(message, "Only managers can set links.");
+    }
+    const [type, ...linkParts] = command.arguments;
+    const link = linkParts.join(" ").trim();
+    if (!type || !link) {
+      return reply(message, `Usage: \`${p}link <type> <url>\``);
+    }
+    if (type.toLowerCase() === "appeal") {
+      store.updateSettings(message.guild.id, { appeal_link: link });
+      return reply(message, { components: [embed("Link set", `Appeal link set to: ${link}`)] });
+    }
+    return reply(message, "Unknown link type. Use `appeal`.");
   }
 
   if (command.name === "invite") {
@@ -300,6 +317,10 @@ async function handlePrefixMessage(message) {
       moderatorId: message.author.id,
       reason,
     });
+    sendDM(message.author.id, message.client, "Warning Issued", `You issued warning **#${w.id}** to <@${targetUser.id}> in **${message.guild.name}**.\nReason: ${reason}`).catch(() => {});
+    const appealLink = store.getAppealLink(message.guild.id);
+    const modDesc = `You received warning **#${w.id}** in **${message.guild.name}**.\nReason: ${reason}${appealLink ? `\nAppeal: ${appealLink}` : ""}`;
+    sendDM(targetUser.id, message.client, "Warning Received", modDesc).catch(() => {});
     return reply(message, {
       components: [
         embed(
@@ -338,6 +359,7 @@ async function handlePrefixMessage(message) {
       moderatorId: message.author.id,
       reason: w.reason,
     });
+    sendDM(message.author.id, message.client, "Warning Removed", `You removed warning **#${id}** from <@${targetUser.id}> in **${message.guild.name}**.`).catch(() => {});
     return reply(message, {
       components: [
         embed(
@@ -415,6 +437,10 @@ async function handlePrefixMessage(message) {
       return reply(message, "You cannot mute that member.");
     }
     await targetMember.timeout(minutes * 60000, reason);
+    sendDM(message.author.id, message.client, "Mute Complete", `You muted <@${targetMember.id}> in **${message.guild.name}**.\nReason: ${reason}`).catch(() => {});
+    const appealLink = store.getAppealLink(message.guild.id);
+    const muteTargetDesc = `You were muted in **${message.guild.name}**.\nReason: ${reason}${appealLink ? `\nAppeal: ${appealLink}` : ""}`;
+    sendDM(targetMember.id, message.client, "Muted", muteTargetDesc).catch(() => {});
     return reply(message, {
       components: [
         embed(
@@ -457,6 +483,8 @@ async function handlePrefixMessage(message) {
       moderatorId: message.author.id,
       reason,
     });
+    sendDM(message.author.id, message.client, "Unmute Complete", `You unmuted <@${targetMember.id}> in **${message.guild.name}**.\nReason: ${reason}`).catch(() => {});
+    sendDM(targetMember.id, message.client, "Unmuted", `You were unmuted in **${message.guild.name}**.\nReason: ${reason}`).catch(() => {});
     return reply(message, {
       components: [
         embed(
@@ -500,6 +528,10 @@ async function handlePrefixMessage(message) {
       moderatorId: message.author.id,
       reason,
     });
+    sendDM(message.author.id, message.client, "Kick Complete", `You kicked <@${targetMember.id}> from **${message.guild.name}**.\nReason: ${reason}`).catch(() => {});
+    const appealLink = store.getAppealLink(message.guild.id);
+    const kickDesc = `You were kicked from **${message.guild.name}**.\nReason: ${reason}${appealLink ? `\nAppeal: ${appealLink}` : ""}`;
+    sendDM(targetMember.id, message.client, "Kicked", kickDesc).catch(() => {});
     return reply(message, {
       components: [
         embed("Kick complete", `<@${targetMember.id}> was kicked.\nReason: ${reason}`),
@@ -547,6 +579,10 @@ async function handlePrefixMessage(message) {
         moderatorId: message.author.id,
         reason,
       });
+      sendDM(message.author.id, message.client, "Softban Complete", `You softbanned <@${targetUser.id}> in **${message.guild.name}**.\nReason: ${reason}`).catch(() => {});
+      const appealLink = store.getAppealLink(message.guild.id);
+      const softDesc = `You were softbanned from **${message.guild.name}**.\nReason: ${reason}${appealLink ? `\nAppeal: ${appealLink}` : ""}`;
+      sendDM(targetUser.id, message.client, "Softbanned", softDesc).catch(() => {});
       return reply(message, {
         components: [
           embed("Softban complete", `<@${targetUser.id}> was softbanned.\nReason: ${reason}`),
@@ -560,6 +596,10 @@ async function handlePrefixMessage(message) {
         moderatorId: message.author.id,
         reason,
       });
+      sendDM(message.author.id, message.client, "Ban Complete", `You banned <@${targetUser.id}> from **${message.guild.name}**.\nReason: ${reason}`).catch(() => {});
+      const appealLink = store.getAppealLink(message.guild.id);
+      const banDesc = `You were banned from **${message.guild.name}**.\nReason: ${reason}${appealLink ? `\nAppeal: ${appealLink}` : ""}`;
+      sendDM(targetUser.id, message.client, "Banned", banDesc).catch(() => {});
       return reply(message, {
         components: [
           embed("Ban complete", `<@${targetUser.id}> was banned.\nReason: ${reason}`),
@@ -589,6 +629,8 @@ async function handlePrefixMessage(message) {
         moderatorId: message.author.id,
         reason,
       });
+      sendDM(message.author.id, message.client, "Unban Complete", `You unbanned <@${targetUser.id}> in **${message.guild.name}**.\nReason: ${reason}`).catch(() => {});
+      sendDM(targetUser.id, message.client, "Unbanned", `You were unbanned from **${message.guild.name}**.\nReason: ${reason}`).catch(() => {});
     } catch (e) {
       if (e.code === 10026) {
         return reply(message, "That user is not banned.");
@@ -876,6 +918,11 @@ async function handlePrefixMessage(message) {
       const name = tagArg.trim().toLowerCase();
       const members = store.tagMembers(message.guild.id, name);
       if (!members.length) return reply(message, `No staff members have the \`${name}\` tag.`);
+      const isMgr = managerCheck(message.guild.id, message.member, message.client);
+      if (isMgr) {
+        const tagDisplay = store.listTags(message.guild.id).find((t) => t.name === name)?.display_name || name;
+        return reply(message, `**${tagDisplay}** staffs: ${members.map((id) => `<@${id}>`).join(", ")}`);
+      }
       return reply(message, members.map((id) => `<@${id}>`).join(" "));
     }
     if (sub === "check") {
@@ -897,6 +944,7 @@ async function handlePrefixMessage(message) {
       const targetUser = userArg ? await resolveUser(message.client, message.guild, userArg) : message.author;
       if (!targetUser) return reply(message, "User not found.");
       store.addStaffTag(message.guild.id, name, targetUser.id, message.author.id);
+      sendDM(targetUser.id, message.client, "Tag Assigned", `You have been assigned the tag **${name}** in **${message.guild.name}**.`).catch(() => {});
       return reply(message, `Assigned tag \`${name}\` to <@${targetUser.id}>.`);
     }
     if (sub === "remove") {
@@ -905,6 +953,7 @@ async function handlePrefixMessage(message) {
       const targetUser = userArg ? await resolveUser(message.client, message.guild, userArg) : message.author;
       if (!targetUser) return reply(message, "User not found.");
       store.removeStaffTag(message.guild.id, name, targetUser.id);
+      sendDM(targetUser.id, message.client, "Tag Removed", `You have been removed from the tag **${name}** in **${message.guild.name}**.`).catch(() => {});
       return reply(message, `Removed tag \`${name}\` from <@${targetUser.id}>.`);
     }
     if (sub === "list") {
@@ -932,6 +981,7 @@ async function handlePrefixMessage(message) {
       return reply(message, "This is not a recognized open ticket.");
     }
     store.assignTicket(message.guild.id, message.channel.id, message.author.id);
+    sendDM(message.author.id, message.client, "Ticket Assigned", `You claimed ticket **${t.panel}** in **${message.guild.name}**.`).catch(() => {});
     return reply(message, {
       content: `<@${t.ticket_user_id}> <@${message.author.id}> has claimed this ticket.`,
       allowedMentions: { users: [t.ticket_user_id, message.author.id] },
@@ -955,6 +1005,7 @@ async function handlePrefixMessage(message) {
       return reply(message, "The recipient must be registered staff.");
     }
     store.assignTicket(message.guild.id, message.channel.id, targetUser.id);
+    sendDM(targetUser.id, message.client, "Ticket Transferred", `You received ticket **${t.panel}** in **${message.guild.name}** from <@${message.author.id}>.`).catch(() => {});
     return reply(message, {
       content: `<@${t.ticket_user_id}> <@${targetUser.id}> has received this ticket from <@${message.author.id}>.`,
       allowedMentions: { users: [t.ticket_user_id, targetUser.id, message.author.id] },

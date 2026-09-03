@@ -16,7 +16,7 @@ db.exec(`
 `);
 db.exec(`
 CREATE TABLE IF NOT EXISTS guilds (guild_id TEXT PRIMARY KEY, created_at INTEGER NOT NULL);
-CREATE TABLE IF NOT EXISTS guild_settings (guild_id TEXT PRIMARY KEY REFERENCES guilds(guild_id) ON DELETE CASCADE, mute_role_id TEXT, support_category_id TEXT, manager_role_id TEXT, log_channel_id TEXT, prefix TEXT NOT NULL DEFAULT 'm.', loa_rules TEXT NOT NULL DEFAULT '[]', sloa_rules TEXT NOT NULL DEFAULT '[]');
+CREATE TABLE IF NOT EXISTS guild_settings (guild_id TEXT PRIMARY KEY REFERENCES guilds(guild_id) ON DELETE CASCADE, mute_role_id TEXT, support_category_id TEXT, manager_role_id TEXT, log_channel_id TEXT, prefix TEXT NOT NULL DEFAULT 'm.', loa_rules TEXT NOT NULL DEFAULT '[]', sloa_rules TEXT NOT NULL DEFAULT '[]', appeal_link TEXT);
 `);
 
 try {
@@ -31,6 +31,16 @@ try {
 } catch (error) {
   if (!error.message.includes("duplicate column name")) throw error;
 }
+try {
+  db.exec("ALTER TABLE guild_settings ADD COLUMN appeal_link TEXT");
+} catch (error) {
+  if (!error.message.includes("duplicate column name")) throw error;
+}
+try {
+  db.exec("ALTER TABLE tickets ADD COLUMN last_message_at INTEGER");
+} catch (error) {
+  if (!error.message.includes("duplicate column name")) throw error;
+}
 
 db.exec(`
 
@@ -42,7 +52,7 @@ CREATE TABLE IF NOT EXISTS sloa (guild_id TEXT NOT NULL, user_id TEXT NOT NULL, 
 CREATE TABLE IF NOT EXISTS tags (id INTEGER PRIMARY KEY AUTOINCREMENT, guild_id TEXT NOT NULL, name TEXT NOT NULL, display_name TEXT NOT NULL, created_at INTEGER NOT NULL, UNIQUE(guild_id,name));
 CREATE TABLE IF NOT EXISTS staff_tags (guild_id TEXT NOT NULL, tag_id INTEGER NOT NULL REFERENCES tags(id) ON DELETE CASCADE, user_id TEXT NOT NULL, assigned_by TEXT NOT NULL, created_at INTEGER NOT NULL, PRIMARY KEY(guild_id,tag_id,user_id));
 CREATE TABLE IF NOT EXISTS ticket_panels (guild_id TEXT NOT NULL, panel TEXT NOT NULL, tag_name TEXT, enabled INTEGER NOT NULL DEFAULT 1, PRIMARY KEY(guild_id,panel));
-CREATE TABLE IF NOT EXISTS tickets (id INTEGER PRIMARY KEY AUTOINCREMENT, guild_id TEXT NOT NULL, channel_id TEXT NOT NULL, panel TEXT NOT NULL, ticket_user_id TEXT, status TEXT NOT NULL, created_at INTEGER NOT NULL, closed_at INTEGER, assigned_staff_id TEXT, UNIQUE(guild_id,channel_id));
+CREATE TABLE IF NOT EXISTS tickets (id INTEGER PRIMARY KEY AUTOINCREMENT, guild_id TEXT NOT NULL, channel_id TEXT NOT NULL, panel TEXT NOT NULL, ticket_user_id TEXT, status TEXT NOT NULL, created_at INTEGER NOT NULL, closed_at INTEGER, assigned_staff_id TEXT, last_message_at INTEGER, UNIQUE(guild_id,channel_id));
 CREATE TABLE IF NOT EXISTS sticky_messages (id INTEGER PRIMARY KEY AUTOINCREMENT, guild_id TEXT NOT NULL, channel_id TEXT NOT NULL, message_id TEXT, content TEXT NOT NULL, updated_at INTEGER NOT NULL, UNIQUE(guild_id,channel_id));
 CREATE TABLE IF NOT EXISTS moderation_logs (id INTEGER PRIMARY KEY AUTOINCREMENT, guild_id TEXT NOT NULL, action TEXT NOT NULL, target_id TEXT, moderator_id TEXT, reason TEXT, created_at INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS original_nicknames (guild_id TEXT NOT NULL, user_id TEXT NOT NULL, nickname TEXT, PRIMARY KEY (guild_id, user_id));
@@ -82,6 +92,7 @@ function updateSettings(guildId, values) {
     "manager_role_id",
     "log_channel_id",
     "prefix",
+    "appeal_link",
   ];
 
   for (const key of allowedKeys) {
@@ -259,6 +270,9 @@ function assignTicket(g, c, u) {
   ).run(u, g, c);
   return ticket(g, c);
 }
+function updateTicketLastMessage(g, c) {
+  db.prepare("UPDATE tickets SET last_message_at=? WHERE guild_id=? AND channel_id=?", Date.now(), g, c);
+}
 function deleteTicket(g, c) {
   db.prepare("DELETE FROM tickets WHERE guild_id=? AND channel_id=?").run(g, c);
 }
@@ -391,4 +405,6 @@ module.exports = {
   getModerationLogs,
   vote,
   getVotes,
+  updateTicketLastMessage,
+  getAppealLink: (g) => settings(g).appeal_link || null,
 };
