@@ -1002,7 +1002,10 @@ const tags = new SlashCommandBuilder()
   .addSubcommand((s) =>
     s
       .setName("addall")
-      .setDescription("Assign all tags to yourself or a user (managers)"),
+      .setDescription("Assign all tags to yourself or a user (managers)")
+      .addUserOption((o) =>
+        o.setName("user").setDescription("Staff member (managers only)"),
+      ),
   )
   .addSubcommand((s) =>
     s
