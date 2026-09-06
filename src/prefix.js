@@ -938,6 +938,17 @@ async function handlePrefixMessage(message) {
         ],
       });
     }
+    if (sub === "addall") {
+      const targetUser = userArg ? await resolveUser(message.client, message.guild, userArg) : message.author;
+      if (!targetUser) return reply(message, "User not found.");
+      if (targetUser.id !== message.author.id && !isMgr)
+        return reply(message, "Only managers can add all tags to another user.");
+      const allTags = store.listTags(message.guild.id);
+      if (!allTags.length) return reply(message, "There are no tags to assign.");
+      for (const t of allTags) store.addStaffTag(message.guild.id, t.name, targetUser.id, message.author.id);
+      sendDM(targetUser.id, message.client, "Tags Assigned", `You have been assigned all tags in **${message.guild.name}**.`).catch(() => {});
+      return reply(message, `Assigned all ${allTags.length} tag(s) to <@${targetUser.id}>: ${allTags.map((t) => `\`${t.display_name}\``).join(", ")}`);
+    }
     if (sub === "add") {
       if (!tagArg) return reply(message, `Usage: \`${p}tag add <tag> [@user]\``);
       const name = tagArg.trim().toLowerCase();
@@ -969,7 +980,7 @@ async function handlePrefixMessage(message) {
         ],
       });
     }
-    return reply(message, `Usage: \`${p}tag <add|remove|list|check|ping|create|delete>\``);
+    return reply(message, `Usage: \`${p}tag <add|remove|addall|list|check|ping|create|delete>\``);
   }
 
   if (command.name === "claim") {

@@ -978,6 +978,11 @@ const tags = new SlashCommandBuilder()
   .addSubcommand((s) => s.setName("list").setDescription("List your tags"))
   .addSubcommand((s) =>
     s
+      .setName("addall")
+      .setDescription("Assign all tags to yourself or a user (managers)"),
+  )
+  .addSubcommand((s) =>
+    s
       .setName("check")
       .setDescription("Find staff with a tag")
       .addStringOption((o) =>
@@ -1034,6 +1039,19 @@ add(tags, "Tags", "Staff / Managers", async (i) => {
   if (s === "delete") {
     store.deleteTag(i.guildId, name);
     return respond(i, { content: `Tag \`${name}\` deleted.` });
+  }
+  if (s === "addall") {
+    const user = i.options.getUser("user") || i.user;
+    if (user.id !== i.user.id && !manager(i))
+      return deny(i, "Only managers can add all tags to another user.");
+    const allTags = store.listTags(i.guildId);
+    if (!allTags.length)
+      return respond(i, { content: "There are no tags to assign." });
+    for (const t of allTags) store.addStaffTag(i.guildId, t.name, user.id, i.user.id);
+    sendDM(user.id, i.client, "Tags Assigned", `You have been assigned all tags in **${i.guild.name}**.`).catch(() => {});
+    return respond(i, {
+      content: `Assigned all ${allTags.length} tag(s) to ${user}: ${allTags.map((t) => `\`${t.display_name}\``).join(", ")}`,
+    });
   }
   if (s === "add" || s === "remove") {
     const user = i.options.getUser("user") || i.user;
