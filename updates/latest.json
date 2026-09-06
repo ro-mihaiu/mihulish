@@ -1,0 +1,13 @@
+{
+  "date": "2026-09-06",
+  "version": "v1.12.11",
+  "changes": [
+    "Added bulk tag assignment with `/tag addall` for assigning an expertise tag to multiple staff members.",
+    "Added bulk tag removal with `/tag remall` for removing an expertise tag from multiple staff members.",
+    "Replaced temporary debug tooling with persistent application logging and log-file rotation.",
+    "Added the `/nukestickies` debug command for clearing sticky-message records when maintenance is needed.",
+    "Restructured `/sticky` into set, remove, and list subcommands with clearer management flows.",
+    "Improved sticky-message usability, including embed fields, stable IDs, and better removal handling.",
+    "Added sticky-message functionality that re-posts configured content when a channel becomes unstuck."
+  ]
+}

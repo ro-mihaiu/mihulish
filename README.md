@@ -6,6 +6,8 @@ Mihulish is a multi-guild Discord utility and staff bot with a dark terminal-ins
 
 The fresh implementation currently includes the foundation, guild-scoped SQLite storage, slash-command metadata, `/help`, LOA, SLOA, warnings, moderation actions, staff registration, expertise tag commands, and ticket claim command surface. Full prefix command support is available alongside slash commands.
 
+`/update` (or the configured prefix followed by `update`) shows the latest release changes. Edit `updates/latest.json` to change the displayed date, version, or change summaries without changing command code.
+
 Ticket channels are intended to be recognized only inside each guild's configured Support category. Initial panel prefixes are `java`, `br`, `bug`, `report`, and `partnership`. Assignment is deliberately command-driven: staff use `/claim`, `/transfer`, or `/unclaim`. The final channel parsing and assignment persistence should be completed before production deployment.
 
 ## Setup

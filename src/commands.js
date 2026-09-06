@@ -6,6 +6,8 @@ const {
   ButtonBuilder,
   ButtonStyle,
 } = require("discord.js");
+const fs = require("fs");
+const path = require("path");
 const store = require("./database");
 const { makeEmbed, logCommand, logEvent, logModeration, sendDM } = require("./utils");
 const COLOR = 0xe91e63;
@@ -229,6 +231,7 @@ function buildHelpEmbed(prefix = "m.") {
       name: "⚙️ Utility & Settings",
       cmds: [
         { name: "help", desc: "Learn about Mihulish and show all commands" },
+        { name: "update", desc: "Show the latest Mihulish changes" },
         { name: "prefix", desc: "Check current server prefix" },
         { name: "settings", desc: "View or configure server roles, channels, and prefix" },
         { name: "link", desc: "Set an appeal link" },
@@ -262,6 +265,18 @@ function buildHelpRow() {
   );
 }
 
+function buildUpdateEmbed() {
+  const update = JSON.parse(
+    fs.readFileSync(path.join(__dirname, "..", "updates", "latest.json"), "utf8"),
+  );
+  const changes = update.changes.map((change, index) => `${index + 1}. ${change}`).join("\n");
+  return new EmbedBuilder()
+    .setColor(COLOR)
+    .setTitle("Mihulish - Latest Changes")
+    .setDescription(changes || "No changes have been published yet.")
+    .setFooter({ text: `${update.date} - ${update.version}` });
+}
+
 add(
   new SlashCommandBuilder()
     .setName("help")
@@ -274,6 +289,14 @@ add(
       components: [buildHelpEmbed(p), buildHelpRow()],
     });
   },
+);
+add(
+  new SlashCommandBuilder()
+    .setName("update")
+    .setDescription("Show the latest Mihulish changes"),
+  "Utility",
+  "Everyone",
+  (i) => respond(i, { components: [buildUpdateEmbed()] }),
 );
 const invite = new SlashCommandBuilder()
   .setName("invite")
@@ -1385,6 +1408,7 @@ module.exports = {
   makeEmbed,
   buildHelpEmbed,
   buildHelpRow,
+  buildUpdateEmbed,
   respond,
   setLeaveNickname,
   staffStatusLine,

@@ -4,6 +4,7 @@ const {
   embed,
   buildHelpEmbed,
   buildHelpRow,
+  buildUpdateEmbed,
   setLeaveNickname,
   staffStatusLine,
   buildStaffDirectory,
@@ -134,6 +135,10 @@ async function handlePrefixMessage(message) {
     return reply(message, {
       components: [buildHelpEmbed(p), buildHelpRow()],
     });
+  }
+
+  if (command.name === "update") {
+    return reply(message, { components: [buildUpdateEmbed()] });
   }
 
   if (command.name === "prefix") {
