@@ -51,6 +51,11 @@ try {
 } catch (error) {
   if (!error.message.includes("duplicate column name")) throw error;
 }
+try {
+  db.exec("ALTER TABLE sticky_messages ADD COLUMN sticky_id TEXT");
+} catch (error) {
+  if (!error.message.includes("duplicate column name")) throw error;
+}
 
 db.exec(`
 
@@ -378,6 +383,13 @@ function getVotes(guildId) {
   if (!row) return { streak: 0, lastVoterId: null, lastVoteAt: null };
   return { streak: row.streak, lastVoterId: row.last_voter_id, lastVoteAt: row.last_vote_at };
 }
+function randomStickyId() {
+  const chars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+  let id = "";
+  for (let n = 0; n < 6; n++)
+    id += chars[Math.floor(Math.random() * chars.length)];
+  return id;
+}
 function getSticky(guildId, channelId) {
   return db
     .prepare("SELECT * FROM sticky_messages WHERE guild_id=? AND channel_id=?")
@@ -385,11 +397,24 @@ function getSticky(guildId, channelId) {
 }
 function setSticky(guildId, channelId, content, format = "plain", embedJson = null) {
   ensureGuild(guildId);
+  let stickyId;
+  do {
+    stickyId = randomStickyId();
+  } while (
+    db
+      .prepare("SELECT 1 FROM sticky_messages WHERE guild_id=? AND sticky_id=?")
+      .get(guildId, stickyId)
+  );
   db.prepare(
-    "INSERT INTO sticky_messages (guild_id, channel_id, content, format, embed_json, updated_at) VALUES (?, ?, ?, ?, ?, ?) " +
-      "ON CONFLICT(guild_id, channel_id) DO UPDATE SET content=excluded.content, format=excluded.format, embed_json=excluded.embed_json, message_id=NULL, updated_at=excluded.updated_at",
-  ).run(guildId, channelId, content, format, embedJson, Date.now());
+    "INSERT INTO sticky_messages (guild_id, channel_id, content, format, embed_json, sticky_id, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?) " +
+      "ON CONFLICT(guild_id, channel_id) DO UPDATE SET content=excluded.content, format=excluded.format, embed_json=excluded.embed_json, sticky_id=excluded.sticky_id, message_id=NULL, updated_at=excluded.updated_at",
+  ).run(guildId, channelId, content, format, embedJson, stickyId, Date.now());
   return getSticky(guildId, channelId);
+}
+function getStickyById(guildId, stickyId) {
+  return db
+    .prepare("SELECT * FROM sticky_messages WHERE guild_id=? AND sticky_id=?")
+    .get(guildId, stickyId);
 }
 function setStickyMessageId(guildId, channelId, messageId) {
   db.prepare(
@@ -406,6 +431,29 @@ function deleteSticky(guildId, channelId) {
     .prepare("DELETE FROM sticky_messages WHERE guild_id=? AND channel_id=?")
     .run(guildId, channelId);
   return info.changes > 0;
+}
+function deleteStickyById(guildId, stickyId) {
+  const row = getStickyById(guildId, stickyId);
+  if (!row) return null;
+  db.prepare("DELETE FROM sticky_messages WHERE guild_id=? AND sticky_id=?").run(
+    guildId,
+    stickyId,
+  );
+  return row;
+}
+function getStickyByMessageId(guildId, messageId) {
+  return db
+    .prepare("SELECT * FROM sticky_messages WHERE guild_id=? AND message_id=?")
+    .get(guildId, messageId);
+}
+function deleteStickyByMessageId(guildId, messageId) {
+  const row = getStickyByMessageId(guildId, messageId);
+  if (!row) return null;
+  db.prepare("DELETE FROM sticky_messages WHERE guild_id=? AND message_id=?").run(
+    guildId,
+    messageId,
+  );
+  return row;
 }
 module.exports = {
   db,
@@ -441,6 +489,9 @@ module.exports = {
   setSticky,
   setStickyMessageId,
   listStickies,
+  getStickyById,
+  deleteStickyById,
+  deleteStickyByMessageId,
   deleteSticky,
   saveOriginalNickname,
   getOriginalNickname,

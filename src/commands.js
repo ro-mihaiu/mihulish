@@ -1131,96 +1131,113 @@ add(unclaim, "Tickets", "Staff", async (i) => {
 
 const sticky = new SlashCommandBuilder()
   .setName("sticky")
-  .setDescription("Manage a sticky message in a channel")
-  .addChannelOption((o) =>
-    o.setName("channel").setDescription("Target channel"),
+  .setDescription("Manage sticky messages")
+  .addSubcommand((s) =>
+    s
+      .setName("set")
+      .setDescription("Set or replace the sticky message in a channel")
+      .addChannelOption((o) =>
+        o.setName("channel").setDescription("Target channel").setRequired(true),
+      )
+      .addStringOption((o) =>
+        o.setName("title").setDescription("Embed title").setMaxLength(256),
+      )
+      .addStringOption((o) =>
+        o.setName("content").setDescription("Message text (or embed description)"),
+      )
+      .addStringOption((o) => o.setName("field1").setDescription("Embed field 1"))
+      .addStringOption((o) => o.setName("field2").setDescription("Embed field 2"))
+      .addStringOption((o) => o.setName("field3").setDescription("Embed field 3"))
+      .addStringOption((o) => o.setName("field4").setDescription("Embed field 4"))
+      .addStringOption((o) => o.setName("field5").setDescription("Embed field 5")),
   )
-  .addStringOption((o) =>
-    o.setName("title").setDescription("Embed title").setMaxLength(256),
+  .addSubcommand((s) =>
+    s
+      .setName("remove")
+      .setDescription("Remove a sticky message by its sticky ID or message ID")
+      .addStringOption((o) =>
+        o
+          .setName("id")
+          .setDescription("Sticky ID (6 characters) or the sticky message ID")
+          .setRequired(true),
+      ),
   )
-  .addStringOption((o) =>
-    o.setName("content").setDescription("Message text (or embed description)"),
-  )
-  .addStringOption((o) => o.setName("field1").setDescription("Embed field 1"))
-  .addStringOption((o) => o.setName("field2").setDescription("Embed field 2"))
-  .addStringOption((o) => o.setName("field3").setDescription("Embed field 3"))
-  .addStringOption((o) => o.setName("field4").setDescription("Embed field 4"))
-  .addStringOption((o) => o.setName("field5").setDescription("Embed field 5"))
-  .addBooleanOption((o) =>
-    o.setName("remove").setDescription("Remove the sticky from the channel"),
-  )
-  .addBooleanOption((o) =>
-    o.setName("list").setDescription("List all sticky messages configured in this server"),
+  .addSubcommand((s) =>
+    s.setName("list").setDescription("List all sticky messages configured in this server"),
   );
+function stickyLabel(r) {
+  let label = r.content ? r.content.slice(0, 80) : "(no text)";
+  if (r.format === "embed" && r.embed_json) {
+    try {
+      const data = JSON.parse(r.embed_json);
+      label = data.title || data.description || "(embed)";
+      if (label === data.description && data.description?.length > 80)
+        label = label.slice(0, 80) + "…";
+    } catch {
+      // keep fallback label
+    }
+  }
+  return label;
+}
 add(sticky, "Utility", "Manage Messages", async (i) => {
   if (
     !i.memberPermissions?.has(PermissionFlagsBits.ManageMessages) &&
     !isBotOwner(i.user.id, i.client)
   )
     return deny(i, "You need Manage Messages.");
-  if (i.options.getBoolean("list")) {
+  const sub = i.options.getSubcommand();
+  if (sub === "list") {
     const rows = store.listStickies(i.guildId);
     const text = rows.length
       ? rows
-          .map((r) => {
-            let label = r.content ? r.content.slice(0, 80) : "(no text)";
-            if (r.format === "embed" && r.embed_json) {
-              try {
-                const data = JSON.parse(r.embed_json);
-                label = data.title || data.description || "(embed)";
-                if (label === data.description && data.description?.length > 80)
-                  label = label.slice(0, 80) + "…";
-              } catch {
-                // keep fallback label
-              }
-            }
-            return `<#${r.channel_id}> — ${label}`;
-          })
+          .map((r) => `<#${r.channel_id}> — \\-${r.sticky_id} — ${stickyLabel(r)}`)
           .join("\n")
       : "No sticky messages configured in this server.";
     return respond(i, { components: [embed("Sticky messages", text)] });
   }
-  const channel = i.options.getChannel("channel");
-  if (!channel)
-    return deny(
-      i,
-      "Provide a channel to set or remove a sticky message, or use the list option.",
-    );
-  if (!channel.isTextBased() || channel.isVoiceBased())
-    return deny(i, "Please choose a text channel.");
-  if (i.options.getBoolean("remove")) {
-    const existing = store.getSticky(i.guildId, channel.id);
-    const removed = store.deleteSticky(i.guildId, channel.id);
-    if (existing?.message_id)
-      await channel.messages.delete(existing.message_id).catch(() => {});
+  if (sub === "remove") {
+    const id = i.options.getString("id").trim();
+    let row = store.deleteStickyById(i.guildId, id);
+    if (!row && /^\\d{15,25}$/.test(id))
+      row = store.deleteStickyByMessageId(i.guildId, id);
+    if (!row) {
+      const byChannel = store.getSticky(i.guildId, id.replace(/^<#|>$/g, ""));
+      if (byChannel) row = store.deleteSticky(i.guildId, byChannel.channel_id) ? byChannel : null;
+    }
+    if (!row)
+      return deny(
+        i,
+        "No sticky message found for that ID. Use `/sticky list` to see configured stickies.",
+      );
+    const channel = i.guild.channels.cache.get(row.channel_id);
+    if (channel?.isTextBased() && row.message_id)
+      await channel.messages.delete(row.message_id).catch(() => {});
     return respond(i, {
-      content: removed
-        ? `Sticky message removed from ${channel}.`
-        : `${channel} has no sticky message.`,
+      content: `Sticky message \\-${row.sticky_id} removed from ${channel ? `<#${row.channel_id}>` : "a deleted channel"}.`,
     });
   }
+  const channel = i.options.getChannel("channel");
+  if (!channel.isTextBased() || channel.isVoiceBased())
+    return deny(i, "Please choose a text channel.");
   const title = i.options.getString("title");
   const content = i.options.getString("content");
   const fields = [1, 2, 3, 4, 5]
     .map((n) => i.options.getString(`field${n}`))
     .filter(Boolean);
   if (!content && !title && !fields.length)
-    return deny(
-      i,
-      "Provide a title, content, or at least one field (or use the remove option).",
-    );
+    return deny(i, "Provide a title, content, or at least one field.");
   let format = "plain";
   let embedJson = null;
   if (title || fields.length) {
     format = "embed";
     embedJson = JSON.stringify({ title: title || null, description: content, fields });
   }
-  store.setSticky(i.guildId, channel.id, content || "", format, embedJson);
+  const row = store.setSticky(i.guildId, channel.id, content || "", format, embedJson);
   return respond(i, {
     components: [
       embed(
         "Sticky message set",
-        `${channel} will now keep this message sticky.`,
+        `${channel} will now keep this message sticky.\nSticky ID: \\-${row.sticky_id}`,
       ),
     ],
   });
