@@ -1243,30 +1243,6 @@ add(sticky, "Utility", "Manage Messages", async (i) => {
   });
 });
 
-// TEMPORARY debug command — remove on signal
-add(
-  new SlashCommandBuilder()
-    .setName("nukestickies")
-    .setDescription("TEMPORARY: delete ALL sticky messages from the database")
-    .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
-  "Utility",
-  "Administrator",
-  async (i) => {
-    if (!isBotOwner(i.user.id, i.client) && !i.memberPermissions?.has(PermissionFlagsBits.Administrator))
-      return deny(i, "Administrators only.");
-    const rows = store.db.prepare("SELECT * FROM sticky_messages").all();
-    for (const row of rows) {
-      if (!row.message_id) continue;
-      const guild = i.client.guilds.cache.get(row.guild_id);
-      const channel = guild?.channels.cache.get(row.channel_id);
-      if (channel?.isTextBased())
-        await channel.messages.delete(row.message_id).catch(() => {});
-    }
-    const count = store.deleteAllStickies();
-    return respond(i, { content: `Deleted ${count} sticky message(s) from the database.` });
-  },
-);
-
 const link = new SlashCommandBuilder()
   .setName("link")
   .setDescription("Set an appeal link")

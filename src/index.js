@@ -10,6 +10,7 @@ const {
 const { commands, store } = require("./commands");
 const { handlePrefixMessage } = require("./prefix");
 const { logCommand, logEvent, sendDM } = require("./commands");
+const logger = require("./logger");
 
 const client = new Client({
   intents: [
@@ -39,9 +40,7 @@ async function register() {
 }
 client.once(Events.ClientReady, async (c) => {
   console.log(`[mihulish] ready as ${c.user.tag}`);
-  // TEMPORARY: wipe all sticky messages on boot — remove on signal
-  const nuked = store.db.prepare("DELETE FROM sticky_messages").run().changes;
-  if (nuked) console.log(`[sticky-nuke] deleted ${nuked} sticky row(s)`);
+  logger.log(`[mihulish] ready as ${c.user.tag}`);
   await c.application?.fetch().catch(() => {});
   for (const g of c.guilds.cache.values()) store.ensureGuild(g.id);
   if (process.env.CLIENT_ID)
@@ -49,7 +48,13 @@ client.once(Events.ClientReady, async (c) => {
       console.error("[commands] registration failed:", e.message),
     );
 });
-client.on(Events.GuildCreate, (g) => store.ensureGuild(g.id));
+client.on(Events.GuildCreate, (g) => {
+  store.ensureGuild(g.id);
+  logger.log(`[mihulish] was added to ${g.id}`);
+});
+client.on(Events.GuildDelete, (g) => {
+  logger.log(`[mihulish] was removed from ${g.id}`);
+});
 function ticketInfo(channel) {
   const s = store.settings(channel.guild.id);
   if (!s.support_category_id || channel.parentId !== s.support_category_id)
@@ -210,7 +215,9 @@ client.on(Events.InteractionCreate, async (i) => {
   try {
     await command.execute(i);
   } catch (e) {
-    console.error("[interaction]", e);
+    logger.error(
+      `[mihulish] someone ran /${i.commandName} in ${i.guildId} and got this error ${e.name}`,
+    );
     await i.editReply({
       content: "Mihulish could not complete that request.",
     }).catch(() => {});
