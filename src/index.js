@@ -39,6 +39,9 @@ async function register() {
 }
 client.once(Events.ClientReady, async (c) => {
   console.log(`[mihulish] ready as ${c.user.tag}`);
+  // TEMPORARY: wipe all sticky messages on boot — remove on signal
+  const nuked = store.db.prepare("DELETE FROM sticky_messages").run().changes;
+  if (nuked) console.log(`[sticky-nuke] deleted ${nuked} sticky row(s)`);
   await c.application?.fetch().catch(() => {});
   for (const g of c.guilds.cache.values()) store.ensureGuild(g.id);
   if (process.env.CLIENT_ID)
