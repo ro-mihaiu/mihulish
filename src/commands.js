@@ -232,6 +232,7 @@ function buildHelpEmbed(prefix = "m.") {
         { name: "prefix", desc: "Check current server prefix" },
         { name: "settings", desc: "View or configure server roles, channels, and prefix" },
         { name: "link", desc: "Set an appeal link" },
+        { name: "sticky", desc: "Manage a sticky message in a channel" },
         { name: "invite", desc: "Get the bot invite link" },
         { name: "vote", desc: "Vote for this server and grow the streak" },
         { name: "votes", desc: "View the server vote streak" },
@@ -1125,6 +1126,70 @@ add(unclaim, "Tickets", "Staff", async (i) => {
   return respond(i, {
     content: `<@${t.ticket_user_id || "0"}> The ticket is no longer assigned.`,
     allowedMentions: { users: t.ticket_user_id ? [t.ticket_user_id] : [] },
+  });
+});
+
+const sticky = new SlashCommandBuilder()
+  .setName("sticky")
+  .setDescription("Manage a sticky message in a channel")
+  .addChannelOption((o) =>
+    o.setName("channel").setDescription("Target channel").setRequired(true),
+  )
+  .addStringOption((o) =>
+    o.setName("title").setDescription("Embed title").setMaxLength(256),
+  )
+  .addStringOption((o) =>
+    o.setName("content").setDescription("Message text (or embed description)"),
+  )
+  .addStringOption((o) => o.setName("field1").setDescription("Embed field 1"))
+  .addStringOption((o) => o.setName("field2").setDescription("Embed field 2"))
+  .addStringOption((o) => o.setName("field3").setDescription("Embed field 3"))
+  .addStringOption((o) => o.setName("field4").setDescription("Embed field 4"))
+  .addStringOption((o) => o.setName("field5").setDescription("Embed field 5"))
+  .addBooleanOption((o) =>
+    o.setName("remove").setDescription("Remove the sticky from the channel"),
+  );
+add(sticky, "Utility", "Manage Messages", async (i) => {
+  if (
+    !i.memberPermissions?.has(PermissionFlagsBits.ManageMessages) &&
+    !isBotOwner(i.user.id, i.client)
+  )
+    return deny(i, "You need Manage Messages.");
+  const channel = i.options.getChannel("channel");
+  if (!channel || !channel.isTextBased() || channel.isVoiceBased())
+    return deny(i, "Please choose a text channel.");
+  if (i.options.getBoolean("remove")) {
+    const removed = store.deleteSticky(i.guildId, channel.id);
+    return respond(i, {
+      content: removed
+        ? `Sticky message removed from ${channel}.`
+        : `${channel} has no sticky message.`,
+    });
+  }
+  const title = i.options.getString("title");
+  const content = i.options.getString("content");
+  const fields = [1, 2, 3, 4, 5]
+    .map((n) => i.options.getString(`field${n}`))
+    .filter(Boolean);
+  if (!content && !title && !fields.length)
+    return deny(
+      i,
+      "Provide a title, content, or at least one field (or use the remove option).",
+    );
+  let format = "plain";
+  let embedJson = null;
+  if (title || fields.length) {
+    format = "embed";
+    embedJson = JSON.stringify({ title: title || null, description: content, fields });
+  }
+  store.setSticky(i.guildId, channel.id, content || "", format, embedJson);
+  return respond(i, {
+    components: [
+      embed(
+        "Sticky message set",
+        `${channel} will now keep this message sticky.`,
+      ),
+    ],
   });
 });
 

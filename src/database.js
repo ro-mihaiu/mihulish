@@ -41,6 +41,16 @@ try {
 } catch (error) {
   if (!error.message.includes("duplicate column name")) throw error;
 }
+try {
+  db.exec("ALTER TABLE sticky_messages ADD COLUMN format TEXT NOT NULL DEFAULT 'plain'");
+} catch (error) {
+  if (!error.message.includes("duplicate column name")) throw error;
+}
+try {
+  db.exec("ALTER TABLE sticky_messages ADD COLUMN embed_json TEXT");
+} catch (error) {
+  if (!error.message.includes("duplicate column name")) throw error;
+}
 
 db.exec(`
 
@@ -368,6 +378,30 @@ function getVotes(guildId) {
   if (!row) return { streak: 0, lastVoterId: null, lastVoteAt: null };
   return { streak: row.streak, lastVoterId: row.last_voter_id, lastVoteAt: row.last_vote_at };
 }
+function getSticky(guildId, channelId) {
+  return db
+    .prepare("SELECT * FROM sticky_messages WHERE guild_id=? AND channel_id=?")
+    .get(guildId, channelId);
+}
+function setSticky(guildId, channelId, content, format = "plain", embedJson = null) {
+  ensureGuild(guildId);
+  db.prepare(
+    "INSERT INTO sticky_messages (guild_id, channel_id, content, format, embed_json, updated_at) VALUES (?, ?, ?, ?, ?, ?) " +
+      "ON CONFLICT(guild_id, channel_id) DO UPDATE SET content=excluded.content, format=excluded.format, embed_json=excluded.embed_json, message_id=NULL, updated_at=excluded.updated_at",
+  ).run(guildId, channelId, content, format, embedJson, Date.now());
+  return getSticky(guildId, channelId);
+}
+function setStickyMessageId(guildId, channelId, messageId) {
+  db.prepare(
+    "UPDATE sticky_messages SET message_id=? WHERE guild_id=? AND channel_id=?",
+  ).run(messageId, guildId, channelId);
+}
+function deleteSticky(guildId, channelId) {
+  const info = db
+    .prepare("DELETE FROM sticky_messages WHERE guild_id=? AND channel_id=?")
+    .run(guildId, channelId);
+  return info.changes > 0;
+}
 module.exports = {
   db,
   ensureGuild,
@@ -398,6 +432,10 @@ module.exports = {
   addStaffTag,
   removeStaffTag,
   userTags,
+  getSticky,
+  setSticky,
+  setStickyMessageId,
+  deleteSticky,
   saveOriginalNickname,
   getOriginalNickname,
   deleteOriginalNickname,

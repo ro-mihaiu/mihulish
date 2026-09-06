@@ -5,6 +5,7 @@ const {
   REST,
   Routes,
   Events,
+  EmbedBuilder,
 } = require("discord.js");
 const { commands, store } = require("./commands");
 const { handlePrefixMessage } = require("./prefix");
@@ -84,6 +85,43 @@ async function inspectTicket(channel) {
 client.on(Events.ChannelCreate, inspectTicket);
 client.on(Events.ChannelUpdate, (_old, next) => inspectTicket(next));
 client.on(Events.MessageCreate, handlePrefixMessage);
+
+async function maintainSticky(message) {
+  if (message.author.bot || !message.guild) return;
+  const sticky = store.getSticky(message.guild.id, message.channel.id);
+  if (!sticky) return;
+  try {
+    const last = await message.channel.messages
+      .fetch({ limit: 1, cache: false })
+      .then((m) => m.first());
+    if (last && last.id === sticky.message_id) return;
+  } catch {
+    return;
+  }
+  if (sticky.message_id) {
+    await message.channel.messages
+      .delete(sticky.message_id)
+      .catch(() => {});
+  }
+  try {
+    let payload;
+    if (sticky.format === "embed" && sticky.embed_json) {
+      const data = JSON.parse(sticky.embed_json);
+      const e = new EmbedBuilder().setColor(0xe91e63);
+      if (data.title) e.setTitle(data.title);
+      if (data.description) e.setDescription(data.description);
+      if (data.fields?.length) e.addFields(data.fields.map((f) => ({ name: f, value: "\u200b" })));
+      payload = { embeds: [e] };
+    } else {
+      payload = { content: sticky.content };
+    }
+    const sent = await message.channel.send(payload);
+    store.setStickyMessageId(message.guild.id, message.channel.id, sent.id);
+  } catch {
+    // ignore send errors (missing permissions etc.)
+  }
+}
+client.on(Events.MessageCreate, maintainSticky);
 
 client.on(Events.MessageCreate, async (message) => {
   if (message.author.bot || !message.guild) return;
