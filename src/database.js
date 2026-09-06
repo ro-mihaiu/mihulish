@@ -304,6 +304,10 @@ function removeStaffTag(g, name, u) {
   ).run(g, g, name, u);
   touchStaffDirectory(g);
 }
+function removeAllStaffTags(g, u) {
+  db.prepare("DELETE FROM staff_tags WHERE guild_id=? AND user_id=?").run(g, u);
+  touchStaffDirectory(g);
+}
 function saveOriginalNickname(g, u, nickname) {
   db.prepare(
     "INSERT OR REPLACE INTO original_nicknames(guild_id,user_id,nickname) VALUES(?,?,?)",
@@ -484,6 +488,7 @@ module.exports = {
   deleteTicket,
   addStaffTag,
   removeStaffTag,
+  removeAllStaffTags,
   userTags,
   getSticky,
   setSticky,

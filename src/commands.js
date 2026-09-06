@@ -1012,6 +1012,14 @@ const tags = new SlashCommandBuilder()
       .addStringOption((o) =>
         o.setName("tag").setDescription("Tag").setRequired(true),
       ),
+  )
+  .addSubcommand((s) =>
+    s
+      .setName("remall")
+      .setDescription("Remove all your tags (managers can target any user)")
+      .addUserOption((o) =>
+        o.setName("user").setDescription("Staff member (managers only)"),
+      ),
   );
 add(tags, "Tags", "Staff / Managers", async (i) => {
   if (!staff(i)) return deny(i);
@@ -1052,6 +1060,17 @@ add(tags, "Tags", "Staff / Managers", async (i) => {
     return respond(i, {
       content: `Assigned all ${allTags.length} tag(s) to ${user}: ${allTags.map((t) => `\`${t.display_name}\``).join(", ")}`,
     });
+  }
+  if (s === "remall") {
+    const user = i.options.getUser("user") || i.user;
+    if (user.id !== i.user.id && !manager(i))
+      return deny(i, "Only managers can remove all tags from another user.");
+    const tagsList = store.userTags(i.guildId, user.id);
+    if (!tagsList.length)
+      return respond(i, { content: `${user} has no tags assigned.` });
+    store.removeAllStaffTags(i.guildId, user.id);
+    sendDM(user.id, i.client, "Tags Removed", `All your tags have been removed in **${i.guild.name}**.`).catch(() => {});
+    return respond(i, { content: `Removed all ${tagsList.length} tag(s) from ${user}.` });
   }
   if (s === "add" || s === "remove") {
     const user = i.options.getUser("user") || i.user;

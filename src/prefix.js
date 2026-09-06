@@ -967,6 +967,17 @@ async function handlePrefixMessage(message) {
       sendDM(targetUser.id, message.client, "Tag Removed", `You have been removed from the tag **${name}** in **${message.guild.name}**.`).catch(() => {});
       return reply(message, `Removed tag \`${name}\` from <@${targetUser.id}>.`);
     }
+    if (sub === "remall") {
+      const targetUser = userArg ? await resolveUser(message.client, message.guild, userArg) : message.author;
+      if (!targetUser) return reply(message, "User not found.");
+      if (targetUser.id !== message.author.id && !isMgr)
+        return reply(message, "Only managers can remove all tags from another user.");
+      const tagsList = store.userTags(message.guild.id, targetUser.id);
+      if (!tagsList.length) return reply(message, `<@${targetUser.id}> has no tags assigned.`);
+      store.removeAllStaffTags(message.guild.id, targetUser.id);
+      sendDM(targetUser.id, message.client, "Tags Removed", `All your tags have been removed in **${message.guild.name}**.`).catch(() => {});
+      return reply(message, `Removed all ${tagsList.length} tag(s) from <@${targetUser.id}>.`);
+    }
     if (sub === "list") {
       const targetUser = tagArg ? await resolveUser(message.client, message.guild, tagArg) : message.author;
       if (!targetUser) return reply(message, "User not found.");
@@ -980,7 +991,7 @@ async function handlePrefixMessage(message) {
         ],
       });
     }
-    return reply(message, `Usage: \`${p}tag <add|remove|addall|list|check|ping|create|delete>\``);
+    return reply(message, `Usage: \`${p}tag <add|remove|addall|remall|list|check|ping|create|delete>\``);
   }
 
   if (command.name === "claim") {
