@@ -455,6 +455,9 @@ function deleteStickyByMessageId(guildId, messageId) {
   );
   return row;
 }
+function deleteAllStickies() {
+  return db.prepare("DELETE FROM sticky_messages").run().changes;
+}
 module.exports = {
   db,
   ensureGuild,
@@ -492,6 +495,7 @@ module.exports = {
   getStickyById,
   deleteStickyById,
   deleteStickyByMessageId,
+  deleteAllStickies,
   deleteSticky,
   saveOriginalNickname,
   getOriginalNickname,
