@@ -1133,7 +1133,7 @@ const sticky = new SlashCommandBuilder()
   .setName("sticky")
   .setDescription("Manage a sticky message in a channel")
   .addChannelOption((o) =>
-    o.setName("channel").setDescription("Target channel").setRequired(true),
+    o.setName("channel").setDescription("Target channel"),
   )
   .addStringOption((o) =>
     o.setName("title").setDescription("Embed title").setMaxLength(256),
@@ -1148,6 +1148,9 @@ const sticky = new SlashCommandBuilder()
   .addStringOption((o) => o.setName("field5").setDescription("Embed field 5"))
   .addBooleanOption((o) =>
     o.setName("remove").setDescription("Remove the sticky from the channel"),
+  )
+  .addBooleanOption((o) =>
+    o.setName("list").setDescription("List all sticky messages configured in this server"),
   );
 add(sticky, "Utility", "Manage Messages", async (i) => {
   if (
@@ -1155,11 +1158,41 @@ add(sticky, "Utility", "Manage Messages", async (i) => {
     !isBotOwner(i.user.id, i.client)
   )
     return deny(i, "You need Manage Messages.");
+  if (i.options.getBoolean("list")) {
+    const rows = store.listStickies(i.guildId);
+    const text = rows.length
+      ? rows
+          .map((r) => {
+            let label = r.content ? r.content.slice(0, 80) : "(no text)";
+            if (r.format === "embed" && r.embed_json) {
+              try {
+                const data = JSON.parse(r.embed_json);
+                label = data.title || data.description || "(embed)";
+                if (label === data.description && data.description?.length > 80)
+                  label = label.slice(0, 80) + "…";
+              } catch {
+                // keep fallback label
+              }
+            }
+            return `<#${r.channel_id}> — ${label}`;
+          })
+          .join("\n")
+      : "No sticky messages configured in this server.";
+    return respond(i, { components: [embed("Sticky messages", text)] });
+  }
   const channel = i.options.getChannel("channel");
-  if (!channel || !channel.isTextBased() || channel.isVoiceBased())
+  if (!channel)
+    return deny(
+      i,
+      "Provide a channel to set or remove a sticky message, or use the list option.",
+    );
+  if (!channel.isTextBased() || channel.isVoiceBased())
     return deny(i, "Please choose a text channel.");
   if (i.options.getBoolean("remove")) {
+    const existing = store.getSticky(i.guildId, channel.id);
     const removed = store.deleteSticky(i.guildId, channel.id);
+    if (existing?.message_id)
+      await channel.messages.delete(existing.message_id).catch(() => {});
     return respond(i, {
       content: removed
         ? `Sticky message removed from ${channel}.`

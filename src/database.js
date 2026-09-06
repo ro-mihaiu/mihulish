@@ -396,6 +396,11 @@ function setStickyMessageId(guildId, channelId, messageId) {
     "UPDATE sticky_messages SET message_id=? WHERE guild_id=? AND channel_id=?",
   ).run(messageId, guildId, channelId);
 }
+function listStickies(guildId) {
+  return db
+    .prepare("SELECT * FROM sticky_messages WHERE guild_id=? ORDER BY channel_id")
+    .all(guildId);
+}
 function deleteSticky(guildId, channelId) {
   const info = db
     .prepare("DELETE FROM sticky_messages WHERE guild_id=? AND channel_id=?")
@@ -435,6 +440,7 @@ module.exports = {
   getSticky,
   setSticky,
   setStickyMessageId,
+  listStickies,
   deleteSticky,
   saveOriginalNickname,
   getOriginalNickname,
