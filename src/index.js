@@ -27,18 +27,18 @@ const client = new Client({
 const rest = new REST({ version: "10" }).setToken(
   process.env.DISCORD_TOKEN || "",
 );
-async function register() {
+async function register(applicationId) {
   const body = commands.map((c) => c.data.toJSON());
   if (process.env.DISCORD_GUILD_ID)
     await rest.put(
       Routes.applicationGuildCommands(
-        process.env.CLIENT_ID,
+        applicationId,
         process.env.DISCORD_GUILD_ID,
       ),
       { body },
     );
   else
-    await rest.put(Routes.applicationCommands(process.env.CLIENT_ID), { body });
+    await rest.put(Routes.applicationCommands(applicationId), { body });
   console.log(`[commands] registered ${body.length} commands`);
 }
 client.once(Events.ClientReady, async (c) => {
@@ -46,10 +46,12 @@ client.once(Events.ClientReady, async (c) => {
   logger.log(`[mihulish] ready as ${c.user.tag}`);
   await c.application?.fetch().catch(() => {});
   for (const g of c.guilds.cache.values()) store.ensureGuild(g.id);
-  if (process.env.CLIENT_ID)
-    await register().catch((e) =>
-      console.error("[commands] registration failed:", e.message),
-    );
+  // Prefer CLIENT_ID when set; otherwise fall back to the verified bot user ID
+  // so registration still works when .env / panel env vars are incomplete.
+  const applicationId = process.env.CLIENT_ID || c.user.id;
+  await register(applicationId).catch((e) =>
+    console.error("[commands] registration failed:", e.message),
+  );
 });
 client.on(Events.GuildCreate, (g) => {
   store.ensureGuild(g.id);

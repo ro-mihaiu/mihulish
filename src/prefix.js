@@ -15,7 +15,9 @@ const {
   logCommand,
   logModeration,
   sendDM,
+  FARM_TYPES,
 } = require("./commands");
+const { fetchVideoTitle } = require("./utils");
 
 const DEFAULT_PREFIX = "m.";
 
@@ -1059,6 +1061,200 @@ async function handlePrefixMessage(message) {
       content: `<@${t.ticket_user_id || "0"}> The ticket is no longer assigned.`,
       allowedMentions: { users: t.ticket_user_id ? [t.ticket_user_id] : [] },
     });
+  }
+
+  if (command.name === "channels") {
+    if (!managerCheck(message.guild.id, message.member, message.client)) {
+      return reply(message, "Only managers can configure farm channels.");
+    }
+    const values = {};
+    for (const [arg, key, label] of [
+      [command.arguments[0], "video_channel_id", "video"],
+      [command.arguments[1], "world_channel_id", "world"],
+      [command.arguments[2], "schematic_channel_id", "schematic"],
+    ]) {
+      if (!arg) continue;
+      const channel = resolveChannel(message.guild, arg);
+      if (!channel || !channel.isTextBased()) {
+        return reply(message, `Channel not found for \`${label}\`. Usage: \`${p}channels [video] [world] [schematic]\``);
+      }
+      values[key] = channel.id;
+    }
+    if (!Object.keys(values).length) {
+      const c = store.getFarmChannelConfig(message.guild.id);
+      if (!c) return reply(message, "No farm channels are configured yet.");
+      return reply(message, {
+        components: [
+          embed(
+            "Farm channels",
+            `Video: ${c.video_channel_id ? `<#${c.video_channel_id}>` : "not set"}\nWorld: ${c.world_channel_id ? `<#${c.world_channel_id}>` : "not set"}\nSchematic: ${c.schematic_channel_id ? `<#${c.schematic_channel_id}>` : "not set"}`,
+          ),
+        ],
+      });
+    }
+    const c = store.setFarmChannelConfig(message.guild.id, values);
+    return reply(message, {
+      components: [
+        embed(
+          "Farm channels updated",
+          `Video: ${c.video_channel_id ? `<#${c.video_channel_id}>` : "not set"}\nWorld: ${c.world_channel_id ? `<#${c.world_channel_id}>` : "not set"}\nSchematic: ${c.schematic_channel_id ? `<#${c.schematic_channel_id}>` : "not set"}`,
+        ),
+      ],
+    });
+  }
+
+  if (command.name === "farm") {
+    if (!managerCheck(message.guild.id, message.member, message.client)) {
+      return reply(message, "Only managers can manage farms.");
+    }
+    const [sub, ...args] = command.arguments;
+    if (sub === "add") {
+      // m.farm add <dn> [type=…] [video=…] [world=…] [schematic=…]
+      const dn = args.find((a) => !a.includes("="));
+      if (!dn) return reply(message, `Usage: \`${p}farm add <dn> [type=] [video=] [world=] [schematic=]\``);
+      const fields = {};
+      for (const a of args) {
+        const eq = a.indexOf("=");
+        if (eq < 1) continue;
+        const key = a.slice(0, eq).toLowerCase();
+        const value = a.slice(eq + 1).trim();
+        if (["type", "video", "world", "schematic"].includes(key) && value) fields[key] = value;
+      }
+      if (fields.type && !FARM_TYPES.includes(fields.type)) {
+        return reply(message, `Unknown farm type \`${fields.type}\`. Valid: ${FARM_TYPES.join(", ")}`);
+      }
+      if (!Object.keys(fields).length)
+        return reply(message, `Provide at least one field: \`${p}farm add ${dn} type=iron video=https://…\``);
+      const currentFarm = store.getFarm(message.guild.id, dn);
+      if (fields.video && (!currentFarm || currentFarm.video !== fields.video)) {
+        const staged = store
+          .listFarmSuggestions(message.guild.id)
+          .find((x) => x.kind === "video" && x.url === fields.video && x.title);
+        fields.video_title = staged ? staged.title : await fetchVideoTitle(fields.video);
+      }
+      const { farm } = store.upsertFarm(message.guild.id, dn, fields, message.author.id);
+      const changedKeys = Object.keys(fields).filter((k) => fields[k] !== currentFarm?.[k]);
+      if (changedKeys.length) {
+        store.appendFarmChange(message.guild.id, {
+          action: "add",
+          dn,
+          fields: Object.fromEntries(changedKeys.map((k) => [k, fields[k]])),
+          by: message.author.id,
+          timestamp: new Date().toISOString(),
+        });
+      }
+      for (const s of store.listFarmSuggestions(message.guild.id)) {
+        if (s.dn === dn) store.deleteFarmSuggestion(message.guild.id, s.id);
+      }
+      return reply(message, {
+        components: [
+          embed(
+            "Farm saved",
+            `DN \`${dn}\`${farm.type ? ` (${farm.type})` : ""}\nVideo: ${farm.video ? `[link](${farm.video})` : "not set"}\nWorld: ${farm.world ? `[link](${farm.world})` : "not set"}\nSchematic: ${farm.schematic ? `[link](${farm.schematic})` : "not set"}${farm.video_title ? `\nVideo title: ${farm.video_title}` : ""}`,
+          ),
+        ],
+      });
+    }
+    if (sub === "remove") {
+      const dn = args[0];
+      if (!dn) return reply(message, `Usage: \`${p}farm remove <dn>\``);
+      if (!store.getFarm(message.guild.id, dn))
+        return reply(message, `No farm exists for DN \`${dn}\`; nothing was removed.`);
+      store.deleteFarm(message.guild.id, dn);
+      store.appendFarmChange(message.guild.id, {
+        action: "remove",
+        dn,
+        by: message.author.id,
+        timestamp: new Date().toISOString(),
+      });
+      return reply(message, `Removed farm \`${dn}\`.`);
+    }
+    if (sub === "list") {
+      const filter = args.find((a) => a.startsWith("type="));
+      const type = filter ? filter.slice(5).toLowerCase() : null;
+      if (type && !FARM_TYPES.includes(type))
+        return reply(message, `Unknown farm type \`${type}\`. Valid: ${FARM_TYPES.join(", ")}`);
+      const farms = store.listFarms(message.guild.id, type);
+      if (!farms.length)
+        return reply(message, type ? `No farms found for type \`${type}\`.` : "No farms found.");
+      const lines = farms.slice(0, 20).map(
+        (f) => `**\`${f.dn}\`** — ${f.type ? `\`${f.type}\`` : "*(no type)*"} — ${stamp(f.created_at)}`,
+      );
+      return reply(message, {
+        components: [
+          embed(
+            type ? `Farms — ${type}` : "Farms",
+            lines.join("\n") + (farms.length > 20 ? `\n…and ${farms.length - 20} more` : ""),
+          ),
+        ],
+      });
+    }
+    if (sub === "suggestions") {
+      const rows = store.listFarmSuggestions(message.guild.id);
+      if (!rows.length) return reply(message, "No staged suggestions right now.");
+      const lines = rows.slice(0, 20).map(
+        (s) => `\`${s.dn ?? "?"}\` — ${s.kind}: ${s.url ?? "*(link missing)*"} (${stamp(s.created_at)})`,
+      );
+      return reply(message, { components: [embed("Farm suggestions", lines.join("\n"))] });
+    }
+    if (sub === "export") {
+      const { current, previous } = store.rotateFarmChangelog(message.guild.id);
+      const meta = {
+        type: "meta",
+        last_updated: new Date().toISOString(),
+        ai_instructions:
+          "Update the target database using the farm records that follow (type=farm), matching on the 'dn' field. Apply the changes listed in 'changes.current' to reconcile any records your database may already have. After processing, discard 'changes.previous' — it is historical context only, not something to re-apply.",
+        changes: { current, previous },
+      };
+      const lines = [JSON.stringify(meta)];
+      const farms = store.listFarms(message.guild.id);
+      for (const f of farms) {
+        lines.push(
+          JSON.stringify({ type: "farm", dn: f.dn, farm_type: f.type, video: f.video, world: f.world, schematic: f.schematic }),
+        );
+      }
+      const sent = await message.reply({
+        content: `Farms export — ${farms.length} farms, ${current.length} change(s) since last export.`,
+        files: [
+          {
+            attachment: Buffer.from(lines.join("\n") + "\n", "utf8"),
+            name: `farms-${Date.now()}.jsonl`,
+          },
+        ],
+      }).catch((error) => {
+        console.error("[prefix] failed to reply:", error.message);
+        return null;
+      });
+      return sent;
+    }
+    return reply(message, `Usage: \`${p}farm <add|remove|list|suggestions|export>\``);
+  }
+
+  if (command.name === "dn") {
+    const dn = command.arguments[0];
+    if (!dn) return reply(message, `Usage: \`${p}dn <dn>\``);
+    const farm = store.getFarm(message.guild.id, dn);
+    if (!farm) return reply(message, `No farm found for DN \`${dn}\`.`);
+    const last = store.getDnCooldown(message.author.id);
+    if (last && Date.now() - last < 2 * 60 * 1000) {
+      const remaining = Math.ceil((2 * 60 * 1000 - (Date.now() - last)) / 1000);
+      return reply(message, `Please wait ${remaining}s before using \`${p}dn\` again.`);
+    }
+    const siteUrl = `https://theysix.ro-mihaiu.xyz/farms/java/${encodeURIComponent(dn)}`;
+    try {
+      await message.author.send({
+        embeds: [
+          embed(
+            farm.video_title || `Farm ${dn}`,
+            farm.type ? `Farm type: ${farm.type}` : "All farm links are on the page below.",
+          ).setURL(siteUrl),
+        ],
+      });
+    } catch {
+      return reply(message, `Couldn't DM you (your DMs may be closed) — here's the link: ${siteUrl}`);
+    }
+    store.setDnCooldown(message.author.id);
+    return reply(message, `Sent you the farm link for \`${dn}\` — check your DMs.`);
   }
 
   return reply(
