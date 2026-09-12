@@ -1,0 +1,7 @@
+{
+  "date": "2026-09-06",
+  "version": "v1.12.11",
+  "changes": [
+    "Improved sticky-message usability, including embed fields, stable IDs, and better removal handling."
+  ]
+}

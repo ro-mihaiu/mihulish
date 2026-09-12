@@ -1,0 +1,7 @@
+{
+  "date": "2026-08-31",
+  "version": "v1.12.2",
+  "changes": [
+    "Removed the unused mihulish-fail subproject."
+  ]
+}

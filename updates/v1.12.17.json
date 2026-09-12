@@ -1,0 +1,7 @@
+{
+  "date": "2026-09-06",
+  "version": "v1.12.17",
+  "changes": [
+    "Added bulk tag removal with `/tag remall` for removing an expertise tag from multiple staff members."
+  ]
+}

@@ -1,0 +1,7 @@
+{
+  "date": "2026-09-06",
+  "version": "v1.12.18",
+  "changes": [
+    "Added the `/update` command showing the latest release changes from `updates/latest.json`."
+  ]
+}

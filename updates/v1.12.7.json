@@ -1,0 +1,7 @@
+{
+  "date": "2026-09-01",
+  "version": "v1.12.7",
+  "changes": [
+    "Reverted container-based components back to standard embeds for consistency."
+  ]
+}

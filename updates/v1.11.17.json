@@ -1,0 +1,7 @@
+{
+  "date": "2026-08-30",
+  "version": "v1.11.17",
+  "changes": [
+    "Added automatic nickname management that reflects LOA/SLOA status, saving original nicknames for restore."
+  ]
+}

@@ -1,0 +1,7 @@
+{
+  "date": "2026-08-30",
+  "version": "v1.12.0",
+  "changes": [
+    "Added `/unwarn`, `/unmute`, and `/unban` to complete the moderation toolset."
+  ]
+}

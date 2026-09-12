@@ -1,0 +1,7 @@
+{
+  "date": "2026-09-06",
+  "version": "v1.12.12",
+  "changes": [
+    "Restructured `/sticky` into set, remove, and list subcommands with clearer management flows."
+  ]
+}

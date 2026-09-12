@@ -1,0 +1,7 @@
+{
+  "date": "2026-09-06",
+  "version": "v1.12.10",
+  "changes": [
+    "Added sticky-message functionality that re-posts configured content when a channel becomes unstuck."
+  ]
+}

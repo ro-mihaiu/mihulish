@@ -1,0 +1,7 @@
+{
+  "date": "2026-09-01",
+  "version": "v1.12.6",
+  "changes": [
+    "Improved interaction acknowledgement and error handling so commands respond more reliably."
+  ]
+}

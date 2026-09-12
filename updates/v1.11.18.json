@@ -1,0 +1,7 @@
+{
+  "date": "2026-08-30",
+  "version": "v1.11.18",
+  "changes": [
+    "Decoupled permission checks into reusable guards and added text-command support with a configurable prefix."
+  ]
+}

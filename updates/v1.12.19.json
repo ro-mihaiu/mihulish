@@ -1,0 +1,7 @@
+{
+  "date": "2026-09-06",
+  "version": "v1.12.19",
+  "changes": [
+    "Added an optional user option to `/tag addall` for assigning tags without full member lists."
+  ]
+}

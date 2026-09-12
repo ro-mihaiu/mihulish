@@ -1,0 +1,7 @@
+{
+  "date": "2026-09-01",
+  "version": "v1.12.4",
+  "changes": [
+    "Allowed managers to set and clear LOA/SLOA on behalf of other staff members."
+  ]
+}

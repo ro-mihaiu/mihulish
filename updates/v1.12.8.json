@@ -1,0 +1,7 @@
+{
+  "date": "2026-09-03",
+  "version": "v1.12.8",
+  "changes": [
+    "Added the appeal link setting and automatic ticket inactivity reminders after 24 hours."
+  ]
+}

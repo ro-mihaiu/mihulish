@@ -1,0 +1,7 @@
+{
+  "date": "2026-09-06",
+  "version": "v1.12.16",
+  "changes": [
+    "Added bulk tag assignment with `/tag addall` for assigning an expertise tag to multiple staff members."
+  ]
+}

@@ -1,0 +1,7 @@
+{
+  "date": "2026-09-03",
+  "version": "v1.12.9",
+  "changes": [
+    "Fixed ticket inactivity timestamps not being saved due to a missing statement run."
+  ]
+}

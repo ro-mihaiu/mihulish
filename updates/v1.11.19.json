@@ -1,0 +1,7 @@
+{
+  "date": "2026-08-30",
+  "version": "v1.11.19",
+  "changes": [
+    "Implemented a global bot owner bypass across settings and staff commands via OWNER_ID."
+  ]
+}

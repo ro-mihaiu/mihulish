@@ -1,0 +1,7 @@
+{
+  "date": "2026-08-31",
+  "version": "v1.12.1",
+  "changes": [
+    "Added the core logging system and server vote tracking with streaks and cooldowns."
+  ]
+}

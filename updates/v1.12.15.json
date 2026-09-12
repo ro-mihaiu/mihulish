@@ -1,0 +1,7 @@
+{
+  "date": "2026-09-06",
+  "version": "v1.12.15",
+  "changes": [
+    "Replaced temporary debug tooling with persistent application logging and log-file rotation."
+  ]
+}
