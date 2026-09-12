@@ -36,47 +36,6 @@ try {
 } catch (error) {
   if (!error.message.includes("duplicate column name")) throw error;
 }
-try {
-  db.exec("ALTER TABLE tickets ADD COLUMN last_message_at INTEGER");
-} catch (error) {
-  if (!error.message.includes("duplicate column name")) throw error;
-}
-try {
-  db.exec("ALTER TABLE sticky_messages ADD COLUMN format TEXT NOT NULL DEFAULT 'plain'");
-} catch (error) {
-  if (!error.message.includes("duplicate column name")) throw error;
-}
-try {
-  db.exec("ALTER TABLE sticky_messages ADD COLUMN embed_json TEXT");
-} catch (error) {
-  if (!error.message.includes("duplicate column name")) throw error;
-}
-try {
-  db.exec("ALTER TABLE sticky_messages ADD COLUMN sticky_id TEXT");
-} catch (error) {
-  if (!error.message.includes("duplicate column name")) throw error;
-}
-for (const col of ["type TEXT", "video_title TEXT", "created_at INTEGER"]) {
-  const name = col.split(" ")[0];
-  try {
-    db.exec(`ALTER TABLE farms ADD COLUMN ${col}`);
-  } catch (error) {
-    if (!error.message.includes("duplicate column name")) throw error;
-  }
-}
-try {
-  db.exec("ALTER TABLE farm_suggestions ADD COLUMN title TEXT");
-} catch (error) {
-  if (!error.message.includes("duplicate column name")) throw error;
-}
-try {
-  db.exec("CREATE INDEX IF NOT EXISTS farms_type ON farms(guild_id, type, created_at)");
-} catch {}
-try {
-  db.exec(
-    "UPDATE farms SET created_at = updated_at WHERE created_at IS NULL",
-  );
-} catch {}
 
 db.exec(`
 
@@ -101,6 +60,51 @@ CREATE TABLE IF NOT EXISTS dn_lookup_cooldowns (user_id TEXT PRIMARY KEY, last_u
 CREATE TABLE IF NOT EXISTS farm_changelog (guild_id TEXT PRIMARY KEY REFERENCES guilds(guild_id) ON DELETE CASCADE, pending_changes TEXT NOT NULL DEFAULT '[]', last_exported_changes TEXT NOT NULL DEFAULT '[]', last_exported_at INTEGER);
 CREATE TABLE IF NOT EXISTS farm_suggestions (id INTEGER PRIMARY KEY AUTOINCREMENT, guild_id TEXT NOT NULL, dn TEXT, kind TEXT NOT NULL, url TEXT, title TEXT, message_id TEXT, created_at INTEGER NOT NULL);
 `);
+
+// Column migrations for pre-existing tables (must run after the CREATE TABLE
+// block above so they never fail with "no such table" on older/newer DBs).
+try {
+  db.exec("ALTER TABLE tickets ADD COLUMN last_message_at INTEGER");
+} catch (error) {
+  if (!error.message.includes("duplicate column name")) throw error;
+}
+try {
+  db.exec("ALTER TABLE sticky_messages ADD COLUMN format TEXT NOT NULL DEFAULT 'plain'");
+} catch (error) {
+  if (!error.message.includes("duplicate column name")) throw error;
+}
+try {
+  db.exec("ALTER TABLE sticky_messages ADD COLUMN embed_json TEXT");
+} catch (error) {
+  if (!error.message.includes("duplicate column name")) throw error;
+}
+try {
+  db.exec("ALTER TABLE sticky_messages ADD COLUMN sticky_id TEXT");
+} catch (error) {
+  if (!error.message.includes("duplicate column name")) throw error;
+}
+
+// Farm-table migrations.
+for (const col of ["type TEXT", "video_title TEXT", "created_at INTEGER"]) {
+  try {
+    db.exec(`ALTER TABLE farms ADD COLUMN ${col}`);
+  } catch (error) {
+    if (!error.message.includes("duplicate column name")) throw error;
+  }
+}
+try {
+  db.exec("ALTER TABLE farm_suggestions ADD COLUMN title TEXT");
+} catch (error) {
+  if (!error.message.includes("duplicate column name")) throw error;
+}
+try {
+  db.exec("CREATE INDEX IF NOT EXISTS farms_type ON farms(guild_id, type, created_at)");
+} catch {}
+try {
+  db.exec(
+    "UPDATE farms SET created_at = updated_at WHERE created_at IS NULL",
+  );
+} catch {}
 
 const DEFAULT_TICKET_PANELS = ["java", "br", "bug", "report", "partnership"];
 
