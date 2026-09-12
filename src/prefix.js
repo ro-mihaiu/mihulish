@@ -1240,7 +1240,7 @@ async function handlePrefixMessage(message) {
       const remaining = Math.ceil((2 * 60 * 1000 - (Date.now() - last)) / 1000);
       return reply(message, `Please wait ${remaining}s before using \`${p}dn\` again.`);
     }
-    const siteUrl = `https://theysix.ro-mihaiu.xyz/farms/java/${encodeURIComponent(dn)}`;
+    const siteUrl = `https://theysix.ro-mihaiu.xyz/farm/java/${encodeURIComponent(dn)}`;
     try {
       await message.author.send({
         embeds: [

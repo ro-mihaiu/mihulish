@@ -535,7 +535,7 @@ function upsertFarm(guildId, dn, fields, updatedBy) {
     schematic: fields.schematic ?? current?.schematic ?? null,
   };
   // created_at is set once on first insert and never overwritten on edits.
-  const createdAt = current?.created_at || now;
+  const createdAt = fields.created_at ?? current?.created_at ?? now;
   db.prepare(
     "INSERT INTO farms(guild_id,dn,type,video,video_title,world,schematic,created_at,updated_at,updated_by) VALUES(?,?,?,?,?,?,?,?,?,?) " +
       "ON CONFLICT(guild_id,dn) DO UPDATE SET type=excluded.type,video=excluded.video,video_title=excluded.video_title,world=excluded.world,schematic=excluded.schematic,created_at=excluded.created_at,updated_at=excluded.updated_at,updated_by=excluded.updated_by",

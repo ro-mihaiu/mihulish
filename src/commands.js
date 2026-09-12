@@ -1667,7 +1667,7 @@ add(farmCmd, "Farms", "Manager", async (i) => {
   });
 });
 
-const FARM_SITE = "https://theysix.ro-mihaiu.xyz/farms/java";
+const FARM_SITE = "https://theysix.ro-mihaiu.xyz/farm/java";
 const DN_COOLDOWN_MS = 2 * 60 * 1000;
 
 const dnCmd = new SlashCommandBuilder()

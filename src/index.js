@@ -1,4 +1,6 @@
 require("dotenv").config();
+const fs = require("node:fs");
+const path = require("node:path");
 const {
   Client,
   GatewayIntentBits,
@@ -14,6 +16,9 @@ const { commands, store, farmPages, farmListEmbed } = require("./commands");
 const { handlePrefixMessage } = require("./prefix");
 const { logCommand, logEvent, sendDM } = require("./commands");
 const logger = require("./logger");
+
+const oneShotFarmImporter = path.resolve(__dirname, "../scripts/import-farms-once.js");
+if (fs.existsSync(oneShotFarmImporter)) require(oneShotFarmImporter);
 
 const client = new Client({
   intents: [
