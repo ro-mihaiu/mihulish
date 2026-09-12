@@ -10,6 +10,12 @@ The fresh implementation currently includes the foundation, guild-scoped SQLite 
 
 Ticket channels are intended to be recognized only inside each guild's configured Support category. Initial panel prefixes are `java`, `br`, `bug`, `report`, and `partnership`. Assignment is deliberately command-driven: staff use `/claim`, `/transfer`, or `/unclaim`. The final channel parsing and assignment persistence should be completed before production deployment.
 
+## Farm link tracker
+
+`/channels` (manager-only) configures three watched channels per guild: `video`, `world`, and `schematic`. The world and schematic channels are scanned for messages containing a `📪DN : <id>` marker plus a link (in plain content or embeds); the video channel is scanned for embeds whose URL is the video link, with the embed title stored verbatim as the farm's `video_title`. Bot messages are ignored unless their IDs are allowlisted via `FARM_RELAY_BOT_IDS` (comma-separated). Detections land in a staging list (`/farm suggestions`) rather than the live dataset; managers confirm them with `/farm add`, which upserts into the farms table (with a fixed-choice `type` from 20 farm types) and appends to a pending changelog. When a video link is set manually, Mihulish fetches the target page's oEmbed/OpenGraph title so `video_title` stays populated. `/farm list` (manager-only) filters by type, sorts by `created_at` descending, and paginates 10 farms per page with Previous/Next buttons. `/farm remove` deletes a farm, and `/farm export` posts a `.jsonl` attachment with a meta line carrying a rolling two-generation changelog (`changes.current` and `changes.previous`) followed by one farm record per line.
+
+`/dn` is open to everyone: it looks up a farm by `dn` and DMs the user an embed titled with the stored `video_title`, linking to `https://theysix.ro-mihaiu.xyz/farms/java/<dn>`. It is rate limited to once per 2 minutes per user (across guilds, persisted in SQLite), and the cooldown only starts on a successful lookup — typos don't burn it. If DMs are closed, the link is replied in-channel instead.
+
 ## Setup
 
 Requires Node.js 22.5 or newer. Copy `.env.example` to `.env` and set `DISCORD_TOKEN`, `CLIENT_ID`, and optionally `OWNER_ID` (your Discord user ID for global bot owner bypass across settings and staff commands). Use `DISCORD_GUILD_ID` only as an optional development shortcut for registering commands in one guild; leave it empty for global command registration when running on multiple servers. Run `npm install`, then `npm start`.

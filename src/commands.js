@@ -8,8 +8,9 @@ const {
 } = require("discord.js");
 const fs = require("fs");
 const path = require("path");
+const { AttachmentBuilder } = require("discord.js");
 const store = require("./database");
-const { makeEmbed, logCommand, logEvent, logModeration, sendDM } = require("./utils");
+const { makeEmbed, logCommand, logEvent, logModeration, sendDM, fetchVideoTitle } = require("./utils");
 const COLOR = 0xe91e63;
 const DOCS = "https://mihulish.ro-mihaiu.xyz";
 const metadata = [];
@@ -1401,6 +1402,316 @@ add(settingsCmd, "Utility", "Administrator", async (i) => {
     });
 });
 
+const channelsCmd = new SlashCommandBuilder()
+  .setName("channels")
+  .setDescription("Configure which channels Mihulish watches for farm links")
+  .addChannelOption((o) =>
+    o.setName("video").setDescription("Channel where video links are posted"),
+  )
+  .addChannelOption((o) =>
+    o.setName("world").setDescription("Channel where world links + DN are posted"),
+  )
+  .addChannelOption((o) =>
+    o.setName("schematic").setDescription("Channel where schematic links + DN are posted"),
+  );
+add(channelsCmd, "Farms", "Manager", async (i) => {
+  if (!manager(i)) return deny(i, "Only managers can configure farm channels.");
+  const video = i.options.getChannel("video"),
+    world = i.options.getChannel("world"),
+    schematic = i.options.getChannel("schematic");
+  const values = {};
+  for (const [opt, key] of [
+    [video, "video_channel_id"],
+    [world, "world_channel_id"],
+    [schematic, "schematic_channel_id"],
+  ]) {
+    if (opt) {
+      if (!opt.isTextBased())
+        return deny(i, "Farm channels must be text channels.");
+      values[key] = opt.id;
+    }
+  }
+  if (!Object.keys(values).length) {
+    const c = store.getFarmChannelConfig(i.guildId);
+    if (!c) return deny(i, "No farm channels are configured yet. Provide video, world, and schematic channels.");
+    return respond(i, {
+      components: [
+        embed(
+          "Farm channels",
+          `Video: ${c.video_channel_id ? `<#${c.video_channel_id}>` : "not set"}\nWorld: ${c.world_channel_id ? `<#${c.world_channel_id}>` : "not set"}\nSchematic: ${c.schematic_channel_id ? `<#${c.schematic_channel_id}>` : "not set"}`,
+        ),
+      ],
+      ephemeral: true,
+    });
+  }
+  const c = store.setFarmChannelConfig(i.guildId, values);
+  return respond(i, {
+    components: [
+      embed(
+        "Farm channels updated",
+        `Video: ${c.video_channel_id ? `<#${c.video_channel_id}>` : "not set"}\nWorld: ${c.world_channel_id ? `<#${c.world_channel_id}>` : "not set"}\nSchematic: ${c.schematic_channel_id ? `<#${c.schematic_channel_id}>` : "not set"}`,
+      ),
+    ],
+  });
+});
+
+const FARM_TYPES = [
+  "bonemeal", "cobblestone", "creeper", "duper", "gold", "iron", "kelp",
+  "lava", "mob", "raid", "resin", "sand", "shulker", "smelter",
+  "sugarcane", "tnt", "wither-skeleton", "wood", "wool", "xp",
+];
+const FARM_TYPE_CHOICES = FARM_TYPES.map((t) => ({ name: t, value: t }));
+
+// In-memory pagination state for /farm list buttons (token -> {guildId,type,page}).
+const farmPages = new Map();
+function newFarmPageToken() {
+  let token;
+  do {
+    token = Math.random().toString(36).slice(2, 10);
+  } while (farmPages.has(token));
+  return token;
+}
+
+function farmListEmbed(guildId, farms, page, perPage, type) {
+  const slice = farms.slice(page * perPage, page * perPage + perPage);
+  const pages = Math.max(1, Math.ceil(farms.length / perPage));
+  const lines = slice.map(
+    (f) =>
+      `**\`${f.dn}\`** — ${f.type ? `\`${f.type}\`` : "*(no type)*"} — <t:${Math.floor(f.created_at / 1000)}:R>`,
+  );
+  return embed(
+    type ? `Farms — ${type}` : "Farms",
+    lines.join("\n") +
+      (farms.length === 0 ? "Nothing here." : "") +
+      (pages > 1 ? `\n\nPage ${page + 1} of ${pages} (${farms.length} farms)` : ""),
+  );
+}
+
+const farmCmd = new SlashCommandBuilder()
+  .setName("farm")
+  .setDescription("Manage tracked farms")
+  .addSubcommand((s) =>
+    s
+      .setName("add")
+      .setDescription("Add or update a farm")
+      .addStringOption((o) =>
+        o.setName("dn").setDescription("Farm identifier, for example ABC123").setRequired(true),
+      )
+      .addStringOption((o) =>
+        o.setName("type").setDescription("Farm type").addChoices(...FARM_TYPE_CHOICES),
+      )
+      .addStringOption((o) => o.setName("video").setDescription("Video link"))
+      .addStringOption((o) => o.setName("world").setDescription("World link"))
+      .addStringOption((o) => o.setName("schematic").setDescription("Schematic link")),
+  )
+  .addSubcommand((s) =>
+    s
+      .setName("list")
+      .setDescription("List tracked farms")
+      .addStringOption((o) =>
+        o.setName("type").setDescription("Filter by farm type").addChoices(...FARM_TYPE_CHOICES),
+      ),
+  )
+  .addSubcommand((s) =>
+    s
+      .setName("remove")
+      .setDescription("Remove a farm")
+      .addStringOption((o) =>
+        o.setName("dn").setDescription("Farm identifier to remove").setRequired(true),
+      ),
+  )
+  .addSubcommand((s) =>
+    s.setName("export").setDescription("Export the farms dataset as a .jsonl file"),
+  )
+  .addSubcommand((s) =>
+    s.setName("suggestions").setDescription("Show passively detected link suggestions"),
+  );
+add(farmCmd, "Farms", "Manager", async (i) => {
+  if (!manager(i))
+    return deny(i, "Only managers can manage farms.");
+  const sub = i.options.getSubcommand();
+
+  if (sub === "add") {
+    const dn = i.options.getString("dn").trim();
+    const fields = {};
+    for (const key of ["type", "video", "world", "schematic"]) {
+      const value = i.options.getString(key);
+      if (value) fields[key] = value;
+    }
+    if (!Object.keys(fields).length)
+      return deny(i, "Provide at least one of type, video, world, or schematic.");
+    // If a video link was set (new or changed) without a matching passively
+    // detected embed title, fetch the target page's own title so video_title
+    // stays in sync with the link.
+    const currentFarm = store.getFarm(i.guildId, dn);
+    if (fields.video && (!currentFarm || currentFarm.video !== fields.video)) {
+      const staged = store
+        .listFarmSuggestions(i.guildId)
+        .find((x) => x.kind === "video" && x.url === fields.video && x.title);
+      fields.video_title = staged ? staged.title : (await fetchVideoTitle(fields.video));
+    }
+    const { farm, changed } = store.upsertFarm(i.guildId, dn, fields, i.user.id);
+    if (Object.keys(changed).length) {
+      store.appendFarmChange(i.guildId, {
+        action: "add",
+        dn,
+        fields: changed,
+        by: i.user.id,
+        timestamp: new Date().toISOString(),
+      });
+    }
+    // A manager confirmation clears matching staged suggestions.
+    for (const s of store.listFarmSuggestions(i.guildId)) {
+      if (s.dn === dn) store.deleteFarmSuggestion(i.guildId, s.id);
+    }
+    return respond(i, {
+      components: [
+        embed(
+          "Farm saved",
+          `DN \`${dn}\`${farm.type ? ` (${farm.type})` : ""}\nVideo: ${farm.video ? `[link](${farm.video})` : "not set"}\nWorld: ${farm.world ? `[link](${farm.world})` : "not set"}\nSchematic: ${farm.schematic ? `[link](${farm.schematic})` : "not set"}${farm.video_title ? `\nVideo title: ${farm.video_title}` : ""}`,
+        ),
+      ],
+    });
+  }
+
+  if (sub === "remove") {
+    const dn = i.options.getString("dn").trim();
+    if (!store.getFarm(i.guildId, dn))
+      return deny(i, `No farm exists for DN \`${dn}\`; nothing was removed.`);
+    store.deleteFarm(i.guildId, dn);
+    store.appendFarmChange(i.guildId, {
+      action: "remove",
+      dn,
+      by: i.user.id,
+      timestamp: new Date().toISOString(),
+    });
+    return respond(i, { content: `Removed farm \`${dn}\`.` });
+  }
+
+  if (sub === "list") {
+    const type = i.options.getString("type");
+    const farms = store.listFarms(i.guildId, type);
+    if (!farms.length)
+      return respond(i, {
+        content: type ? `No farms found for type \`${type}\`.` : "No farms found.",
+        ephemeral: true,
+      });
+    const perPage = 10;
+    const pages = Math.ceil(farms.length / perPage);
+    const pageToken = newFarmPageToken();
+    const row = new ActionRowBuilder().addComponents(
+      new ButtonBuilder()
+        .setCustomId(`farm_list_prev_${pageToken}_${type ?? "all"}`)
+        .setLabel("Previous")
+        .setStyle(ButtonStyle.Secondary)
+        .setDisabled(true),
+      new ButtonBuilder()
+        .setCustomId(`farm_list_next_${pageToken}_${type ?? "all"}`)
+        .setLabel("Next")
+        .setStyle(ButtonStyle.Secondary)
+        .setDisabled(pages <= 1),
+    );
+    farmPages.set(pageToken, { guildId, type, page: 0 });
+    return respond(i, {
+      components: [farmListEmbed(i.guildId, farms, 0, perPage, type), row],
+      ephemeral: true,
+    });
+  }
+
+  if (sub === "suggestions") {
+    const rows = store.listFarmSuggestions(i.guildId);
+    if (!rows.length) return respond(i, { content: "No staged suggestions right now.", ephemeral: true });
+    const lines = rows.slice(0, 20).map(
+      (s) =>
+        `\`${s.dn ?? "?"}\` — ${s.kind}: ${s.url ?? "*(link missing)*"} (<t:${Math.floor(s.created_at / 1000)}:R>)`,
+    );
+    return respond(i, {
+      components: [
+        embed(
+          "Farm suggestions",
+          lines.join("\n") + (rows.length > 20 ? `\n…and ${rows.length - 20} more` : ""),
+        ),
+      ],
+      ephemeral: true,
+    });
+  }
+
+  // export
+  const { current, previous } = store.rotateFarmChangelog(i.guildId);
+  const meta = {
+    type: "meta",
+    last_updated: new Date().toISOString(),
+    ai_instructions:
+      "Update the target database using the farm records that follow (type=farm), matching on the 'dn' field. Apply the changes listed in 'changes.current' to reconcile any records your database may already have. After processing, discard 'changes.previous' — it is historical context only, not something to re-apply.",
+    changes: { current, previous },
+  };
+  const lines = [JSON.stringify(meta)];
+  for (const f of store.listFarms(i.guildId)) {
+    lines.push(
+      JSON.stringify({
+        type: "farm",
+        dn: f.dn,
+        farm_type: f.type,
+        video: f.video,
+        world: f.world,
+        schematic: f.schematic,
+      }),
+    );
+  }
+  const file = new AttachmentBuilder(Buffer.from(lines.join("\n") + "\n", "utf8"), {
+    name: `farms-${Date.now()}.jsonl`,
+  });
+  return respond(i, {
+    content: `Farms export — ${store.listFarms(i.guildId).length} farms, ${current.length} change(s) since last export.`,
+    files: [file],
+  });
+});
+
+const FARM_SITE = "https://theysix.ro-mihaiu.xyz/farms/java";
+const DN_COOLDOWN_MS = 2 * 60 * 1000;
+
+const dnCmd = new SlashCommandBuilder()
+  .setName("dn")
+  .setDescription("Look up a farm and get its link in your DMs")
+  .addStringOption((o) =>
+    o.setName("dn").setDescription("Farm identifier, for example ABC123").setRequired(true),
+  );
+add(dnCmd, "Farms", "Everyone", async (i) => {
+  const dn = i.options.getString("dn").trim();
+  const farm = store.getFarm(i.guildId, dn);
+  if (!farm)
+    // Not found: no cooldown consumed — typos shouldn't burn the 2-minute wait.
+    return respond(i, { content: `No farm found for DN \`${dn}\`.`, ephemeral: true });
+
+  const last = store.getDnCooldown(i.user.id);
+  if (last && Date.now() - last < DN_COOLDOWN_MS) {
+    const remaining = Math.ceil((DN_COOLDOWN_MS - (Date.now() - last)) / 1000);
+    return respond(i, {
+      content: `Please wait ${remaining}s before using \`/dn\` again.`,
+      ephemeral: true,
+    });
+  }
+
+  const siteUrl = `${FARM_SITE}/${encodeURIComponent(dn)}`;
+  const dmEmbed = embed(
+    farm.video_title || `Farm ${dn}`,
+    farm.type ? `Farm type: ${farm.type}` : "All farm links are on the page below.",
+  ).setURL(siteUrl);
+  try {
+    await i.user.send({ embeds: [dmEmbed] });
+  } catch {
+    return respond(i, {
+      content: `Couldn't DM you (your DMs may be closed) — here's the link: ${siteUrl}`,
+      ephemeral: true,
+    });
+  }
+  store.setDnCooldown(i.user.id);
+  return respond(i, {
+    content: `Sent you the farm link for \`${dn}\` — check your DMs.`,
+    ephemeral: true,
+  });
+});
+
 module.exports = {
   commands,
   metadata,
@@ -1424,4 +1735,7 @@ module.exports = {
   logEvent,
   logModeration,
   sendDM,
+  farmPages,
+  farmListEmbed,
+  FARM_TYPES,
 };

@@ -92,3 +92,47 @@ async function sendDM(userId, client, title, description) {
 }
 
 module.exports = { makeEmbed, logCommand, logEvent, logModeration, sendDM };
+// Fetch the page title of a video URL via oEmbed (YouTube etc.) with an
+// OpenGraph meta-tag fallback. Returns null when neither path yields a title.
+async function fetchVideoTitle(url) {
+  if (!url || !/^https?:\/\//i.test(url)) return null;
+  // Known oEmbed endpoints embed the video URL as a query parameter.
+  let oembedUrl = null;
+  if (/youtube\.com|youtu\.be/i.test(url))
+    oembedUrl = `https://www.youtube.com/oembed?url=${encodeURIComponent(url)}&format=json`;
+  else if (/vimeo\.com/i.test(url))
+    oembedUrl = `https://vimeo.com/api/oembed.json?url=${encodeURIComponent(url)}`;
+  if (oembedUrl) {
+    try {
+      const res = await fetch(oembedUrl, {
+        headers: { accept: "application/json" },
+        signal: AbortSignal.timeout(8000),
+      });
+      if (res.ok) {
+        const data = await res.json().catch(() => null);
+        if (data?.title) return String(data.title);
+      }
+    } catch {
+      // fall through to OpenGraph
+    }
+  }
+  try {
+    const res = await fetch(url, {
+      headers: { "user-agent": "Mozilla/5.0 (compatible; Mihulish bot)" },
+      signal: AbortSignal.timeout(8000),
+    });
+    if (res.ok) {
+      const html = (await res.text()).slice(0, 300_000);
+      const m =
+        /<meta[^>]+property=["']og:title["'][^>]+content=["']([^"']+)["']/i.exec(html) ||
+        /<meta[^>]+content=["']([^"']+)["'][^>]+property=["']og:title["']/i.exec(html) ||
+        /<title[^>]*>([^<]+)<\/title>/i.exec(html);
+      if (m) return m[1].trim();
+    }
+  } catch {
+    // network error — give up
+  }
+  return null;
+}
+
+module.exports = { makeEmbed, logCommand, logEvent, logModeration, sendDM, fetchVideoTitle };

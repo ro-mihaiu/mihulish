@@ -6,8 +6,11 @@ const {
   Routes,
   Events,
   EmbedBuilder,
+  ActionRowBuilder,
+  ButtonBuilder,
+  ButtonStyle,
 } = require("discord.js");
-const { commands, store } = require("./commands");
+const { commands, store, farmPages, farmListEmbed } = require("./commands");
 const { handlePrefixMessage } = require("./prefix");
 const { logCommand, logEvent, sendDM } = require("./commands");
 const logger = require("./logger");
@@ -93,6 +96,12 @@ async function inspectTicket(channel) {
 client.on(Events.ChannelCreate, inspectTicket);
 client.on(Events.ChannelUpdate, (_old, next) => inspectTicket(next));
 client.on(Events.MessageCreate, handlePrefixMessage);
+const { handleFarmMessage } = require("./farm-detect");
+client.on(Events.MessageCreate, (message) => {
+  handleFarmMessage(message).catch((e) =>
+    console.error("[farm-detect]", e.message),
+  );
+});
 
 async function maintainSticky(message) {
   if (message.author.bot || !message.guild) return;
@@ -222,6 +231,40 @@ client.on(Events.InteractionCreate, async (i) => {
       content: "Mihulish could not complete that request.",
     }).catch(() => {});
   }
+});
+
+const FARM_LIST_PER_PAGE = 10;
+client.on(Events.InteractionCreate, async (i) => {
+  if (!i.isButton() || !i.customId.startsWith("farm_list_")) return;
+  const [, , dir, token, typeRaw] = i.customId.split("_");
+  const state = farmPages.get(token);
+  if (!state) {
+    await i.update({ content: "This farm list has expired — run `/farm list` again.", components: [], embeds: [] }).catch(() => {});
+    return;
+  }
+  const farms = store.listFarms(state.guildId, state.type);
+  const pages = Math.max(1, Math.ceil(farms.length / FARM_LIST_PER_PAGE));
+  const next = dir === "next" ? state.page + 1 : state.page - 1;
+  if (next < 0 || next >= pages) return i.deferUpdate().catch(() => {});
+  state.page = next;
+  const row = new ActionRowBuilder().addComponents(
+    new ButtonBuilder()
+      .setCustomId(`farm_list_prev_${token}_${typeRaw}`)
+      .setLabel("Previous")
+      .setStyle(ButtonStyle.Secondary)
+      .setDisabled(next === 0),
+    new ButtonBuilder()
+      .setCustomId(`farm_list_next_${token}_${typeRaw}`)
+      .setLabel("Next")
+      .setStyle(ButtonStyle.Secondary)
+      .setDisabled(next >= pages - 1),
+  );
+  await i
+    .update({
+      embeds: [farmListEmbed(state.guildId, farms, next, FARM_LIST_PER_PAGE, state.type)],
+      components: [row],
+    })
+    .catch(() => {});
 });
 
 client.on(Events.GuildMemberAdd, (member) => {

@@ -56,6 +56,27 @@ try {
 } catch (error) {
   if (!error.message.includes("duplicate column name")) throw error;
 }
+for (const col of ["type TEXT", "video_title TEXT", "created_at INTEGER"]) {
+  const name = col.split(" ")[0];
+  try {
+    db.exec(`ALTER TABLE farms ADD COLUMN ${col}`);
+  } catch (error) {
+    if (!error.message.includes("duplicate column name")) throw error;
+  }
+}
+try {
+  db.exec("ALTER TABLE farm_suggestions ADD COLUMN title TEXT");
+} catch (error) {
+  if (!error.message.includes("duplicate column name")) throw error;
+}
+try {
+  db.exec("CREATE INDEX IF NOT EXISTS farms_type ON farms(guild_id, type, created_at)");
+} catch {}
+try {
+  db.exec(
+    "UPDATE farms SET created_at = updated_at WHERE created_at IS NULL",
+  );
+} catch {}
 
 db.exec(`
 
@@ -73,6 +94,12 @@ CREATE TABLE IF NOT EXISTS moderation_logs (id INTEGER PRIMARY KEY AUTOINCREMENT
 CREATE TABLE IF NOT EXISTS original_nicknames (guild_id TEXT NOT NULL, user_id TEXT NOT NULL, nickname TEXT, PRIMARY KEY (guild_id, user_id));
 CREATE TABLE IF NOT EXISTS votes (guild_id TEXT PRIMARY KEY REFERENCES guilds(guild_id) ON DELETE CASCADE, streak INTEGER NOT NULL DEFAULT 0, last_vote_at INTEGER, last_voter_id TEXT);
 CREATE TABLE IF NOT EXISTS user_votes (guild_id TEXT NOT NULL, user_id TEXT NOT NULL, last_vote_at INTEGER NOT NULL, PRIMARY KEY (guild_id, user_id));
+CREATE TABLE IF NOT EXISTS farm_channel_config (guild_id TEXT PRIMARY KEY REFERENCES guilds(guild_id) ON DELETE CASCADE, video_channel_id TEXT, world_channel_id TEXT, schematic_channel_id TEXT);
+CREATE TABLE IF NOT EXISTS farms (guild_id TEXT NOT NULL, dn TEXT NOT NULL, type TEXT, video TEXT, video_title TEXT, world TEXT, schematic TEXT, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, updated_by TEXT, PRIMARY KEY (guild_id, dn));
+CREATE INDEX IF NOT EXISTS farms_type ON farms(guild_id, type, created_at);
+CREATE TABLE IF NOT EXISTS dn_lookup_cooldowns (user_id TEXT PRIMARY KEY, last_used_at INTEGER NOT NULL);
+CREATE TABLE IF NOT EXISTS farm_changelog (guild_id TEXT PRIMARY KEY REFERENCES guilds(guild_id) ON DELETE CASCADE, pending_changes TEXT NOT NULL DEFAULT '[]', last_exported_changes TEXT NOT NULL DEFAULT '[]', last_exported_at INTEGER);
+CREATE TABLE IF NOT EXISTS farm_suggestions (id INTEGER PRIMARY KEY AUTOINCREMENT, guild_id TEXT NOT NULL, dn TEXT, kind TEXT NOT NULL, url TEXT, title TEXT, message_id TEXT, created_at INTEGER NOT NULL);
 `);
 
 const DEFAULT_TICKET_PANELS = ["java", "br", "bug", "report", "partnership"];
@@ -459,6 +486,165 @@ function deleteStickyByMessageId(guildId, messageId) {
   );
   return row;
 }
+// ---------------- Farm link tracker ----------------
+function getFarmChannelConfig(guildId) {
+  return db
+    .prepare("SELECT * FROM farm_channel_config WHERE guild_id=?")
+    .get(guildId);
+}
+function setFarmChannelConfig(guildId, values) {
+  ensureGuild(guildId);
+  const current = getFarmChannelConfig(guildId) || {};
+  db.prepare(
+    "INSERT INTO farm_channel_config(guild_id,video_channel_id,world_channel_id,schematic_channel_id) VALUES(?,?,?,?) " +
+      "ON CONFLICT(guild_id) DO UPDATE SET video_channel_id=excluded.video_channel_id,world_channel_id=excluded.world_channel_id,schematic_channel_id=excluded.schematic_channel_id",
+  ).run(
+    guildId,
+    values.video_channel_id ?? current.video_channel_id ?? null,
+    values.world_channel_id ?? current.world_channel_id ?? null,
+    values.schematic_channel_id ?? current.schematic_channel_id ?? null,
+  );
+  return getFarmChannelConfig(guildId);
+}
+function farmByChannel(guildId, channelId) {
+  const c = getFarmChannelConfig(guildId);
+  if (!c) return null;
+  if (c.world_channel_id === channelId) return "world";
+  if (c.schematic_channel_id === channelId) return "schematic";
+  if (c.video_channel_id === channelId) return "video";
+  return null;
+}
+function getFarm(guildId, dn) {
+  return db
+    .prepare("SELECT * FROM farms WHERE guild_id=? AND dn=?")
+    .get(guildId, dn);
+}
+function upsertFarm(guildId, dn, fields, updatedBy) {
+  ensureGuild(guildId);
+  const current = getFarm(guildId, dn);
+  const now = Date.now();
+  const merged = {
+    type: fields.type ?? current?.type ?? null,
+    video: fields.video ?? current?.video ?? null,
+    video_title: fields.video_title ?? current?.video_title ?? null,
+    world: fields.world ?? current?.world ?? null,
+    schematic: fields.schematic ?? current?.schematic ?? null,
+  };
+  // created_at is set once on first insert and never overwritten on edits.
+  const createdAt = current?.created_at || now;
+  db.prepare(
+    "INSERT INTO farms(guild_id,dn,type,video,video_title,world,schematic,created_at,updated_at,updated_by) VALUES(?,?,?,?,?,?,?,?,?,?) " +
+      "ON CONFLICT(guild_id,dn) DO UPDATE SET type=excluded.type,video=excluded.video,video_title=excluded.video_title,world=excluded.world,schematic=excluded.schematic,created_at=excluded.created_at,updated_at=excluded.updated_at,updated_by=excluded.updated_by",
+  ).run(guildId, dn, merged.type, merged.video, merged.video_title, merged.world, merged.schematic, createdAt, now, updatedBy || null);
+  const changed = {};
+  for (const key of ["type", "video", "video_title", "world", "schematic"]) {
+    if (fields[key] !== undefined && fields[key] !== current?.[key]) changed[key] = fields[key];
+  }
+  return { farm: getFarm(guildId, dn), changed, isNew: !current };
+}
+function deleteFarm(guildId, dn) {
+  return (
+    db.prepare("DELETE FROM farms WHERE guild_id=? AND dn=?").run(guildId, dn)
+      .changes > 0
+  );
+}
+function listFarms(guildId, type = null) {
+  if (type)
+    return db
+      .prepare("SELECT * FROM farms WHERE guild_id=? AND type=? ORDER BY created_at DESC")
+      .all(guildId, type);
+  return db
+    .prepare("SELECT * FROM farms WHERE guild_id=? ORDER BY created_at DESC")
+    .all(guildId);
+}
+function setDnCooldown(userId, timestamp = Date.now()) {
+  db.prepare(
+    "INSERT INTO dn_lookup_cooldowns(user_id,last_used_at) VALUES(?,?) " +
+      "ON CONFLICT(user_id) DO UPDATE SET last_used_at=excluded.last_used_at",
+  ).run(userId, timestamp);
+}
+function getDnCooldown(userId) {
+  return db
+    .prepare("SELECT last_used_at FROM dn_lookup_cooldowns WHERE user_id=?")
+    .get(userId)?.last_used_at || null;
+}
+function farmChangelogState(guildId) {
+  ensureGuild(guildId);
+  db.prepare("INSERT OR IGNORE INTO farm_changelog(guild_id) VALUES(?)").run(guildId);
+  const row = db
+    .prepare("SELECT * FROM farm_changelog WHERE guild_id=?")
+    .get(guildId);
+  if (!row) return { pending_changes: [], last_exported_changes: [], last_exported_at: null };
+  let pending, last;
+  try { pending = JSON.parse(row.pending_changes) || []; } catch { pending = []; }
+  try { last = JSON.parse(row.last_exported_changes) || []; } catch { last = []; }
+  return { pending_changes: pending, last_exported_changes: last, last_exported_at: row.last_exported_at || null };
+}
+function setFarmChangelogState(guildId, pending, lastExported) {
+  ensureGuild(guildId);
+  db.prepare(
+    "INSERT INTO farm_changelog(guild_id,pending_changes,last_exported_changes,last_exported_at) VALUES(?,?,?,?) " +
+      "ON CONFLICT(guild_id) DO UPDATE SET pending_changes=excluded.pending_changes,last_exported_changes=excluded.last_exported_changes,last_exported_at=excluded.last_exported_at",
+  ).run(
+    guildId,
+    JSON.stringify(pending || []),
+    JSON.stringify(lastExported || []),
+    Date.now(),
+  );
+}
+function appendFarmChange(guildId, entry) {
+  const state = farmChangelogState(guildId);
+  state.pending_changes.push(entry);
+  db.prepare("UPDATE farm_changelog SET pending_changes=? WHERE guild_id=?").run(
+    JSON.stringify(state.pending_changes),
+    guildId,
+  );
+}
+function rotateFarmChangelog(guildId) {
+  const state = farmChangelogState(guildId);
+  const current = state.pending_changes;
+  setFarmChangelogState(guildId, [], current);
+  return { current, previous: state.last_exported_changes };
+}
+function upsertFarmSuggestion(guildId, { dn = null, kind, url = null, title = null, messageId = null }) {
+  ensureGuild(guildId);
+  // try to merge into an existing partial suggestion (same dn, same kind)
+  const existing = db
+    .prepare("SELECT * FROM farm_suggestions WHERE guild_id=? AND kind=?")
+    .all(guildId, kind);
+  const target =
+    existing.find((x) => dn && x.dn === dn) ||
+    existing.find((x) => url && x.url === url) ||
+    existing.find((x) => messageId && x.message_id === messageId) ||
+    existing.find((x) => x.dn === null && x.url === null);
+  if (target) {
+    db.prepare(
+      "UPDATE farm_suggestions SET dn=COALESCE(dn,?),url=COALESCE(url,?),title=COALESCE(title,?),message_id=COALESCE(message_id,?) WHERE id=?",
+    ).run(dn, url, title, messageId, target.id);
+    return db.prepare("SELECT * FROM farm_suggestions WHERE id=?").get(target.id);
+  }
+  const dupe = url
+    ? db
+        .prepare("SELECT 1 FROM farm_suggestions WHERE guild_id=? AND kind=? AND url=? AND dn IS ?")
+        .get(guildId, kind, url, dn)
+    : null;
+  if (dupe) return null;
+  db.prepare(
+    "INSERT INTO farm_suggestions(guild_id,dn,kind,url,title,message_id,created_at) VALUES(?,?,?,?,?,?,?)",
+  ).run(guildId, dn, kind, url, title, messageId, Date.now());
+  return null;
+}
+function listFarmSuggestions(guildId) {
+  return db
+    .prepare("SELECT * FROM farm_suggestions WHERE guild_id=? ORDER BY created_at DESC")
+    .all(guildId);
+}
+function deleteFarmSuggestion(guildId, id) {
+  return db.prepare("DELETE FROM farm_suggestions WHERE guild_id=? AND id=?").run(guildId, id).changes > 0;
+}
+function getFarmByDn(guildId, dn) {
+  return getFarm(guildId, dn);
+}
 module.exports = {
   db,
   ensureGuild,
@@ -507,4 +693,22 @@ module.exports = {
   getVotes,
   updateTicketLastMessage,
   getAppealLink: (g) => settings(g).appeal_link || null,
+  getFarmChannelConfig,
+  setFarmChannelConfig,
+  farmByChannel,
+  getFarm,
+  getFarmByDn,
+  upsertFarm,
+  deleteFarm,
+  listFarms,
+  listFarmsByType: (g, t) => listFarms(g, t),
+  setDnCooldown,
+  getDnCooldown,
+  farmChangelogState,
+  setFarmChangelogState,
+  appendFarmChange,
+  rotateFarmChangelog,
+  upsertFarmSuggestion,
+  listFarmSuggestions,
+  deleteFarmSuggestion,
 };

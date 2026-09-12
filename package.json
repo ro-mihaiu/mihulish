@@ -9,7 +9,7 @@
   },
   "scripts": {
     "start": "node src/index.js",
-    "check": "node --check src/index.js && node --check src/database.js && node --check src/commands.js && node --check src/prefix.js",
+    "check": "node --check src/index.js && node --check src/database.js && node --check src/commands.js && node --check src/prefix.js && node --check src/farm-detect.js",
     "db-check": "node scripts/db-check.js"
   },
   "dependencies": {
