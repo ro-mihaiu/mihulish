@@ -59,6 +59,8 @@ CREATE INDEX IF NOT EXISTS farms_type ON farms(guild_id, type, created_at);
 CREATE TABLE IF NOT EXISTS dn_lookup_cooldowns (user_id TEXT PRIMARY KEY, last_used_at INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS farm_changelog (guild_id TEXT PRIMARY KEY REFERENCES guilds(guild_id) ON DELETE CASCADE, pending_changes TEXT NOT NULL DEFAULT '[]', last_exported_changes TEXT NOT NULL DEFAULT '[]', last_exported_at INTEGER);
 CREATE TABLE IF NOT EXISTS farm_suggestions (id INTEGER PRIMARY KEY AUTOINCREMENT, guild_id TEXT NOT NULL, dn TEXT, kind TEXT NOT NULL, url TEXT, title TEXT, message_id TEXT, created_at INTEGER NOT NULL);
+CREATE TABLE IF NOT EXISTS guild_wikis (guild_id TEXT NOT NULL, article_name TEXT NOT NULL, link TEXT NOT NULL, created_by TEXT, created_at INTEGER NOT NULL, updated_at INTEGER, PRIMARY KEY (guild_id, article_name));
+CREATE UNIQUE INDEX IF NOT EXISTS guild_wikis_name ON guild_wikis(guild_id, article_name COLLATE NOCASE);
 `);
 
 // Column migrations for pre-existing tables (must run after the CREATE TABLE
@@ -649,6 +651,57 @@ function deleteFarmSuggestion(guildId, id) {
 function getFarmByDn(guildId, dn) {
   return getFarm(guildId, dn);
 }
+// ---------------- Per-guild wiki ----------------
+function addWikiEntry(guildId, articleName, link, createdBy) {
+  ensureGuild(guildId);
+  const now = Date.now();
+  try {
+    db.prepare(
+      "INSERT INTO guild_wikis(guild_id,article_name,link,created_by,created_at,updated_at) VALUES(?,?,?,?,?,?)",
+    ).run(guildId, articleName, link, createdBy || null, now, now);
+  } catch (error) {
+    if (!String(error.message).includes("UNIQUE")) throw error;
+    return db
+      .prepare(
+        "SELECT * FROM guild_wikis WHERE guild_id=? AND article_name=? COLLATE NOCASE",
+      )
+      .get(guildId, articleName);
+  }
+  return db
+    .prepare(
+      "SELECT * FROM guild_wikis WHERE guild_id=? AND article_name=? COLLATE NOCASE",
+    )
+    .get(guildId, articleName);
+}
+function deleteWikiByLink(guildId, link) {
+  return (
+    db
+      .prepare(
+        "DELETE FROM guild_wikis WHERE guild_id=? AND lower(trim(link))=lower(?)",
+      )
+      .run(guildId, link.trim()).changes > 0
+  );
+}
+function getWikiByName(guildId, articleName) {
+  return db
+    .prepare(
+      "SELECT * FROM guild_wikis WHERE guild_id=? AND article_name=? COLLATE NOCASE",
+    )
+    .get(guildId, articleName.trim());
+}
+function listWikiNames(guildId) {
+  return db
+    .prepare(
+      "SELECT article_name FROM guild_wikis WHERE guild_id=? ORDER BY article_name COLLATE NOCASE",
+    )
+    .all(guildId)
+    .map((x) => x.article_name);
+}
+function listWikiLinks(guildId) {
+  return db
+    .prepare("SELECT * FROM guild_wikis WHERE guild_id=? ORDER BY article_name COLLATE NOCASE")
+    .all(guildId);
+}
 module.exports = {
   db,
   ensureGuild,
@@ -715,4 +768,9 @@ module.exports = {
   upsertFarmSuggestion,
   listFarmSuggestions,
   deleteFarmSuggestion,
+  addWikiEntry,
+  deleteWikiByLink,
+  getWikiByName,
+  listWikiNames,
+  listWikiLinks,
 };

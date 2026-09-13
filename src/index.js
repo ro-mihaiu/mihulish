@@ -240,6 +240,17 @@ client.on(Events.InteractionCreate, async (i) => {
   }
 });
 
+client.on(Events.InteractionCreate, async (i) => {
+  if (!i.isAutocomplete()) return;
+  const command = commands.find((c) => c.data.name === i.commandName);
+  if (!command?.autocomplete) return i.respond([]).catch(() => {});
+  try {
+    await command.autocomplete(i);
+  } catch (e) {
+    console.error("[autocomplete]", i.commandName, e.message);
+  }
+});
+
 const FARM_LIST_PER_PAGE = 10;
 client.on(Events.InteractionCreate, async (i) => {
   if (!i.isButton() || !i.customId.startsWith("farm_list_")) return;

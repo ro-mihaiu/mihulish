@@ -1712,6 +1712,136 @@ add(dnCmd, "Farms", "Everyone", async (i) => {
   });
 });
 
+// ---------------- Per-guild wiki ----------------
+function isValidHttpUrl(value) {
+  try {
+    const url = new URL(value);
+    return url.protocol === "http:" || url.protocol === "https:";
+  } catch {
+    return false;
+  }
+}
+
+async function wikiAutocomplete(i) {
+  const focused = i.options.getFocused(true).find((o) => o.name === "article-name");
+  if (!focused) return i.respond([]);
+  const query = String(focused.value || "").toLowerCase();
+  const choices = store
+    .listWikiNames(i.guildId)
+    .filter((name) => name.toLowerCase().includes(query))
+    .slice(0, 25)
+    .map((name) => ({ name, value: name }));
+  return i.respond(choices);
+}
+
+const wikiCmd = new SlashCommandBuilder()
+  .setName("wiki")
+  .setDescription("Manage this server's wiki links")
+  .addSubcommand((s) =>
+    s
+      .setName("add")
+      .setDescription("Add a wiki entry for this server")
+      .addStringOption((o) =>
+        o.setName("link").setDescription("The URL the entry points to").setRequired(true),
+      )
+      .addStringOption((o) =>
+        o
+          .setName("article-name")
+          .setDescription("Human-readable name of the entry")
+          .setRequired(true)
+          .setMaxLength(100),
+      ),
+  )
+  .addSubcommand((s) =>
+    s
+      .setName("remove")
+      .setDescription("Remove a wiki entry by its link")
+      .addStringOption((o) =>
+        o.setName("link").setDescription("The exact URL of the entry to remove").setRequired(true),
+      ),
+  )
+  .addSubcommand((s) =>
+    s
+      .setName("show")
+      .setDescription("Show a wiki entry")
+      .addStringOption((o) =>
+        o
+          .setName("article-name")
+          .setDescription("Name of the entry (autocomplete available)")
+          .setRequired(true)
+          .setAutocomplete(true),
+      ),
+  );
+add(wikiCmd, "Utility", "Manage Messages", async (i) => {
+  const sub = i.options.getSubcommand();
+
+  if (sub === "add") {
+    if (
+      !i.memberPermissions?.has(PermissionFlagsBits.ManageMessages) &&
+      !isBotOwner(i.user.id, i.client)
+    )
+      return deny(i, "You need Manage Messages to add wiki entries.");
+    const link = i.options.getString("link").trim();
+    const articleName = i.options.getString("article-name").trim();
+    if (!isValidHttpUrl(link))
+      return deny(i, "That link doesn't look valid — please provide a well-formed http(s) URL.");
+    const existing = store.addWikiEntry(i.guildId, articleName, link, i.user.id);
+    if (existing.created_at !== existing.updated_at)
+      return deny(
+        i,
+        `A wiki entry named **${existing.article_name}** already exists in this server. Remove it first with \`/wiki remove\` or use a different name.`,
+      );
+    return respond(i, {
+      components: [
+        embed(
+          "Wiki entry added",
+          `**${existing.article_name}**\n${link}\nAdded by <@${i.user.id}>`,
+        ),
+      ],
+    });
+  }
+
+  if (sub === "remove") {
+    if (
+      !i.memberPermissions?.has(PermissionFlagsBits.ManageMessages) &&
+      !isBotOwner(i.user.id, i.client)
+    )
+      return deny(i, "You need Manage Messages to remove wiki entries.");
+    const link = i.options.getString("link").trim();
+    if (store.deleteWikiByLink(i.guildId, link))
+      return respond(i, { content: `Removed the wiki entry for ${link}.` });
+    const close = store
+      .listWikiLinks(i.guildId)
+      .filter((r) => r.link.toLowerCase().includes(link.replace(/^https?:\/\//, "").split("/")[0] || ""))
+      .slice(0, 5)
+      .map((r) => r.article_name);
+    const suggestions = close.length
+      ? `\nClose matches in this server: ${close.map((n) => `**${n}**`).join(", ")}.`
+      : "";
+    return deny(i, `No wiki entry with that link exists in this server.${suggestions}`);
+  }
+
+  // show
+  const articleName = i.options.getString("article-name").trim();
+  const row = store.getWikiByName(i.guildId, articleName);
+  if (!row)
+    return deny(
+      i,
+      `No wiki entry named **${articleName}** was found. Start typing the name with \`/wiki show\` to see the available entries.`,
+    );
+  const showEmbed = embed(row.article_name, row.link).setURL(row.link);
+  return respond(i, {
+    components: [
+      showEmbed,
+      new ActionRowBuilder().addComponents(
+        new ButtonBuilder().setLabel("Open link").setStyle(ButtonStyle.Link).setURL(row.link),
+      ),
+    ],
+  });
+});
+// Attach the autocomplete handler for /wiki show's article-name option.
+commands.find((c) => c.data.name === "wiki").autocomplete = wikiAutocomplete;
+
 module.exports = {
   commands,
   metadata,
