@@ -1723,9 +1723,8 @@ function isValidHttpUrl(value) {
 }
 
 async function wikiAutocomplete(i) {
-  const focused = i.options.getFocused(true).find((o) => o.name === "article-name");
-  if (!focused) return i.respond([]);
-  const query = String(focused.value || "").toLowerCase();
+  if (i.options.getSubcommand(false) !== "show") return i.respond([]);
+  const query = String(i.options.getFocused() || "").toLowerCase();
   const choices = store
     .listWikiNames(i.guildId)
     .filter((name) => name.toLowerCase().includes(query))
