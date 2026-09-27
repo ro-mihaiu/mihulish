@@ -1867,6 +1867,65 @@ add(wikiCmd, "Utility", "Manage Messages", async (i) => {
 // Attach the autocomplete handler for /wiki show's article-name option.
 commands.find((c) => c.data.name === "wiki").autocomplete = wikiAutocomplete;
 
+const cmdCmd = new SlashCommandBuilder()
+  .setName("cmd")
+  .setDescription("Manage custom trigger commands")
+  .addSubcommand((s) =>
+    s
+      .setName("add")
+      .setDescription("Add a custom command")
+      .addStringOption((o) =>
+        o.setName("trigger").setDescription("Trigger word (e.g., dn)").setRequired(true),
+      )
+      .addStringOption((o) =>
+        o.setName("content").setDescription("Response content").setRequired(true),
+      ),
+  )
+  .addSubcommand((s) =>
+    s
+      .setName("remove")
+      .setDescription("Remove a custom command")
+      .addStringOption((o) =>
+        o.setName("trigger").setDescription("Trigger word to remove").setRequired(true),
+      ),
+  )
+  .addSubcommand((s) => s.setName("list").setDescription("List all custom commands"));
+add(cmdCmd, "Utility", "Manage Messages", async (i) => {
+  if (
+    !i.memberPermissions?.has(PermissionFlagsBits.ManageMessages) &&
+    !isBotOwner(i.user.id, i.client)
+  )
+    return deny(i, "You need Manage Messages to manage custom commands.");
+  const sub = i.options.getSubcommand();
+  if (sub === "add") {
+    const trigger = i.options.getString("trigger").trim().toLowerCase();
+    const content = i.options.getString("content");
+    if (!trigger || !content) return deny(i, "Trigger and content are required.");
+    store.addCustomCommand(i.guildId, trigger, content, i.user.id);
+    return respond(i, {
+      components: [
+        embed(
+          "Custom command added",
+          `Trigger: \`${trigger}\`\nContent: ${content.slice(0, 1000)}`,
+        ),
+      ],
+    });
+  }
+  if (sub === "remove") {
+    const trigger = i.options.getString("trigger").trim().toLowerCase();
+    if (store.removeCustomCommand(i.guildId, trigger))
+      return respond(i, { content: `Removed custom command \`${trigger}\`.` });
+    return deny(i, `No custom command found for trigger \`${trigger}\`.`);
+  }
+  // list
+  const cmds = store.listCustomCommands(i.guildId);
+  if (!cmds.length) return respond(i, { content: "No custom commands configured." });
+  const lines = cmds.map((c) => `\`${c.trigger}\` — ${c.content.slice(0, 80)}${c.content.length > 80 ? "…" : ""}`);
+  return respond(i, {
+    components: [embed("Custom commands", lines.join("\n"))],
+  });
+});
+
 module.exports = {
   commands,
   metadata,

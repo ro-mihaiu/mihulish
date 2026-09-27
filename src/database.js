@@ -68,6 +68,7 @@ CREATE TABLE IF NOT EXISTS farm_changelog (guild_id TEXT PRIMARY KEY REFERENCES 
 CREATE TABLE IF NOT EXISTS farm_suggestions (id INTEGER PRIMARY KEY AUTOINCREMENT, guild_id TEXT NOT NULL, dn TEXT, kind TEXT NOT NULL, url TEXT, title TEXT, message_id TEXT, created_at INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS guild_wikis (guild_id TEXT NOT NULL, article_name TEXT NOT NULL, link TEXT NOT NULL, created_by TEXT, created_at INTEGER NOT NULL, updated_at INTEGER, PRIMARY KEY (guild_id, article_name));
 CREATE UNIQUE INDEX IF NOT EXISTS guild_wikis_name ON guild_wikis(guild_id, article_name COLLATE NOCASE);
+CREATE TABLE IF NOT EXISTS custom_commands (guild_id TEXT NOT NULL, trigger TEXT NOT NULL, content TEXT NOT NULL, created_by TEXT, created_at INTEGER NOT NULL, PRIMARY KEY (guild_id, trigger));
 `);
 
 // Column migrations for pre-existing tables (must run after the CREATE TABLE
@@ -755,6 +756,32 @@ function listWikiLinks(guildId) {
     .prepare("SELECT * FROM guild_wikis WHERE guild_id=? ORDER BY article_name COLLATE NOCASE")
     .all(guildId);
 }
+
+function addCustomCommand(guildId, trigger, content, createdBy) {
+  return db
+    .prepare(
+      "INSERT OR REPLACE INTO custom_commands(guild_id,trigger,content,created_by,created_at) VALUES(?,?,?,?,?)",
+    )
+    .run(guildId, trigger.toLowerCase().trim(), content.trim(), createdBy, Date.now());
+}
+
+function removeCustomCommand(guildId, trigger) {
+  return db
+    .prepare("DELETE FROM custom_commands WHERE guild_id=? AND trigger=?")
+    .run(guildId, trigger.toLowerCase().trim()).changes > 0;
+}
+
+function getCustomCommand(guildId, trigger) {
+  return db
+    .prepare("SELECT * FROM custom_commands WHERE guild_id=? AND trigger=?")
+    .get(guildId, trigger.toLowerCase().trim());
+}
+
+function listCustomCommands(guildId) {
+  return db
+    .prepare("SELECT * FROM custom_commands WHERE guild_id=? ORDER BY trigger COLLATE NOCASE")
+    .all(guildId);
+}
 module.exports = {
   db,
   ensureGuild,
@@ -826,4 +853,8 @@ module.exports = {
   getWikiByName,
   listWikiNames,
   listWikiLinks,
+  addCustomCommand,
+  removeCustomCommand,
+  getCustomCommand,
+  listCustomCommands,
 };

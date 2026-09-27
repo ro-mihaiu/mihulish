@@ -1261,6 +1261,36 @@ async function handlePrefixMessage(message) {
     return reply(message, `Sent you the farm link for \`${dn}\` — check your DMs.`);
   }
 
+  if (command.name === "cmd") {
+    if (
+      !message.member.permissions.has(PermissionFlagsBits.ManageMessages) &&
+      !isBotOwner(message.author.id, message.client)
+    ) {
+      return reply(message, "You need Manage Messages to manage custom commands.");
+    }
+    const [sub, triggerArg, ...contentParts] = command.arguments;
+    const trigger = triggerArg?.toLowerCase().trim();
+    if (sub === "add") {
+      const content = contentParts.join(" ").trim();
+      if (!trigger || !content) return reply(message, `Usage: \`${p}cmd add <trigger> <content>\``);
+      store.addCustomCommand(message.guild.id, trigger, content, message.author.id);
+      return reply(message, { components: [embed("Custom command added", `Trigger: \`${trigger}\`\nContent: ${content.slice(0, 1000)}`)] });
+    }
+    if (sub === "remove") {
+      if (!trigger) return reply(message, `Usage: \`${p}cmd remove <trigger>\``);
+      if (store.removeCustomCommand(message.guild.id, trigger))
+        return reply(message, `Removed custom command \`${trigger}\`.`);
+      return reply(message, `No custom command found for trigger \`${trigger}\`.`);
+    }
+    if (sub === "list") {
+      const cmds = store.listCustomCommands(message.guild.id);
+      if (!cmds.length) return reply(message, "No custom commands configured.");
+      const lines = cmds.map((c) => `\`${c.trigger}\` — ${c.content.slice(0, 80)}${c.content.length > 80 ? "…" : ""}`);
+      return reply(message, { components: [embed("Custom commands", lines.join("\n"))] });
+    }
+    return reply(message, `Usage: \`${p}cmd <add|remove|list> [trigger] [content]\``);
+  }
+
   return reply(
     message,
     "Unknown command `" +

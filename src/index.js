@@ -197,6 +197,20 @@ client.on(Events.MessageCreate, (message) => {
   );
 });
 
+async function handleCustomCommand(message) {
+  if (!message.guild || message.author.bot) return;
+  const trigger = message.content.trim().toLowerCase();
+  const cmd = require("./database").getCustomCommand(message.guild.id, trigger);
+  if (!cmd) return;
+  await message.reply(cmd.content).catch(() => {});
+}
+
+client.on(Events.MessageCreate, (message) => {
+  handleCustomCommand(message).catch((e) =>
+    console.error("[custom-cmd]", e.message),
+  );
+});
+
 client.on(Events.MessageCreate, async (message) => {
   if (message.author.bot || !message.guild) return;
   const s = store.settings(message.guild.id);
