@@ -1,0 +1,575 @@
+SLOA | ro_mihaiuRole icon, Manager — 8/31/26, 3:34 PM
+m.settings
+mihulishRole icon, Bots
+APP
+ — 8/31/26, 3:34 PM
+Guild settings
+Mute role: not set
+Support category: not set
+Manager role: not set
+Log channel: not set
+Prefix: m.
+mihulishRole icon, Bots
+APP
+ — 8/31/26, 3:34 PM
+Settings updated
+Mute role: not set
+Support category: #Support
+Manager role: @Manager
+Log channel: ⁠🔒╏log-system
+Prefix: m.
+mihulishRole icon, Bots
+APP
+ — 8/31/26, 3:35 PM
+Staff added
+@SLOA | ro_mihaiu is registered as staff.
+mihulishRole icon, Bots
+APP
+ — 8/31/26, 3:35 PM
+Staff added
+@Catrooper is registered as staff.
+mihulishRole icon, Bots
+APP
+ — 8/31/26, 3:35 PM
+Staff added
+@Chefjr73 is registered as staff.
+mihulishRole icon, Bots
+APP
+ — 8/31/26, 3:35 PM
+Staff added
+@SLOA | Squidy_787 is registered as staff.
+mihulishRole icon, Bots
+APP
+ — 8/31/26, 3:36 PM
+Staff added
+@͘.michal_w is registered as staff.
+mihulishRole icon, Bots
+APP
+ — 8/31/26, 3:37 PM
+Mihulish — Commands
+A dark, terminal-inspired Discord utility bot for moderation, staff management, tickets, and LOA/SLOA.
+
+Commands can be used via slash commands (/command) or server prefix (m.command).
+Server prefix: m.
+🛡️ Moderation
+warn — Warn a member with a reason
+unwarn — Remove a warning from a member
+warns — View warning history for a member
+warnings — View recent server-wide warnings
+mute — Timeout a member for specified minutes
+unmute — Remove timeout from a member
+kick — Kick a member from the server
+ban — Ban a member from the server
+unban — Unban a user from the server
+softban — Softban a member (ban and prune messages)
+bans — List active server bans
+📋 Staff & Leave
+staff — Add, remove, or upgrade staff members
+loa — Manage leave of absence status, rules, or list
+sloa — Manage semi leave of absence status, rules, or list
+tag — Manage staff expertise tags and assignments
+🎫 Tickets
+claim — Claim the current support ticket
+transfer — Transfer ticket to another staff member
+unclaim — Release claim on the current ticket
+⚙️ Utility & Settings
+help — Learn about Mihulish and show all commands
+prefix — Check current server prefix
+settings — View or configure server roles, channels, and prefix
+mihulishRole icon, Bots
+APP
+ — 9/1/26, 12:25 PM
+Configured staff
+@SLOA | ro_mihaiu — 
+<@1379526531415806135> — 
+@Chefjr73 — 
+<@1088035064757108787> — 
+@͘.michal_w — ``
+mihulishRole icon, Bots
+APP
+ — 9/1/26, 12:25 PM
+Staff added
+@Talha is registered as staff.
+mihulishRole icon, Bots
+APP
+ — 9/1/26, 12:26 PM
+Staff added
+@Omar Mokhtar is registered as staff.
+mihulishRole icon, Bots
+APP
+ — 9/1/26, 12:26 PM
+Staff added
+@savage pop tart is registered as staff.
+SLOA | ro_mihaiuRole icon, Manager — 9/1/26, 12:26 PM
+.roles
+mihulishRole icon, Bots
+APP
+ — 9/1/26, 12:26 PM
+Staff added
+@TheySix is registered as staff.
+mihulishRole icon, Bots
+APP
+ — 9/1/26, 12:26 PM
+Staff added
+@Catrooper is registered as staff.
+mihulishRole icon, Bots
+APP
+ — 9/1/26, 12:27 PM
+Staff added
+@Amethyst is registered as staff.
+mihulishRole icon, Bots
+APP
+ — 9/1/26, 12:27 PM
+Staff added
+@Mister Fish is registered as staff.
+mihulishRole icon, Bots
+APP
+ — 9/1/26, 12:27 PM
+Staff added
+@kiaxiko is registered as staff.
+mihulishRole icon, Bots
+APP
+ — 9/1/26, 12:28 PM
+Staff added
+@notMik is registered as staff.
+mihulishRole icon, Bots
+APP
+ — 9/1/26, 12:28 PM
+Configured staff
+@SLOA | ro_mihaiu — 
+<@1379526531415806135> — 
+@Chefjr73 — 
+<@1088035064757108787> — 
+@͘.michal_w — 
+<@1174717898049212426> — 
+@Omar Mokhtar — 
+<@1033408653685960744> — 
+@TheySix — 
+<@738037578673946644> — 
+@Mister Fish — 
+<@1092526308531114095> — 
+@notMik — ``
+SLOA | ro_mihaiuRole icon, Manager — 9/1/26, 12:28 PM
+bruh
+m.tag list
+mihulishRole icon, Bots
+APP
+ — 9/1/26, 12:34 PM
+Tags for ro_mihaiu
+No tags assigned.
+SLOA | ro_mihaiuRole icon, Manager — 9/1/26, 1:42 PM
+m.staff list
+mihulishRole icon, Bots
+APP
+ — 9/1/26, 1:42 PM
+Configured staff
+TheySix
+theysix
+No tags
+
+Manager
+ro_mihaiu
+No tags
+catrooper
+No tags
+talhamolla_777
+No tags
+.notmik
+No tags
+
+Admin
+honeysucking
+No tags
+fish5438
+No tags
+kiaxiko
+No tags
+
+Head Moderator
+savitar02245
+No tags
+
+Moderator
+omarmokhtar.
+No tags
+
+Helper Team
+chefjr73
+No tags
+squidy_322
+No tags
+.michal_w
+No tags
+mihulishRole icon, Bots
+APP
+ — 9/1/26, 1:46 PM
+Configured staff
+TheySix
+theysix
+No tags
+
+Manager
+ro_mihaiu
+No tags
+catrooper
+No tags
+talhamolla_777
+No tags
+.notmik
+No tags
+
+Admin
+honeysucking
+No tags
+fish5438
+No tags
+kiaxiko
+No tags
+
+Head Moderator
+savitar02245
+No tags
+
+Moderator
+omarmokhtar.
+No tags
+
+Helper Team
+chefjr73
+No tags
+squidy_322
+No tags
+.michal_w
+No tags
+mihulishRole icon, Bots
+APP
+ — 9/1/26, 1:47 PM
+LOA active
+@SLOA | ro_mihaiu — test
+⚠️ Cannot rename a member with an equal or higher role than the bot.
+mihulishRole icon, Bots
+APP
+ — 9/1/26, 1:47 PM
+Configured staff
+TheySix
+theysix
+No tags
+
+Manager
+ro_mihaiu - LOA
+No tags
+catrooper
+No tags
+talhamolla_777
+No tags
+.notmik
+No tags
+
+Admin
+honeysucking
+No tags
+fish5438
+No tags
+kiaxiko
+No tags
+
+Head Moderator
+savitar02245
+No tags
+
+Moderator
+omarmokhtar.
+No tags
+
+Helper Team
+chefjr73
+No tags
+squidy_322
+No tags
+.michal_w
+No tags
+Last updated <t:1788259625:f>
+SLOA | ro_mihaiuRole icon, Manager — 9/1/26, 1:47 PM
+@Talha :D
+.roles
+mihulishRole icon, Bots
+APP
+ — 9/1/26, 1:48 PM
+Staff added
+@Alex is registered as staff.
+mihulishRole icon, Bots
+APP
+ — 9/1/26, 1:48 PM
+Staff added
+@xqc is registered as staff.
+mihulishRole icon, Bots
+APP
+ — 9/1/26, 1:48 PM
+Staff added
+@killermachine_13 is registered as staff.
+mihulishRole icon, Bots
+APP
+ — 9/1/26, 1:49 PM
+Staff added
+@SLOA | hindustani_gamer_fardin is registered as staff.
+mihulishRole icon, Bots
+APP
+ — 9/1/26, 1:49 PM
+Staff added
+@LOA | xerodegreess is registered as staff.
+mihulishRole icon, Bots
+APP
+ — 9/1/26, 1:50 PM
+Staff added
+@[AFK] chaoscrusher_. is registered as staff.
+mihulishRole icon, Bots
+APP
+ — 9/1/26, 1:50 PM
+Staff added
+@harsh is registered as staff.
+mihulishRole icon, Bots
+APP
+ — 9/1/26, 1:50 PM
+Staff added
+@🔥 Itz_sitian is registered as staff.
+mihulishRole icon, Bots
+APP
+ — 9/1/26, 1:50 PM
+Staff added
+@tanxim__ is registered as staff.
+mihulishRole icon, Bots
+APP
+ — 9/1/26, 1:50 PM
+Configured staff
+TheySix
+theysix
+No tags
+
+Manager
+ro_mihaiu - LOA
+No tags
+catrooper
+No tags
+talhamolla_777
+No tags
+.notmik
+No tags
+
+Admin
+honeysucking
+No tags
+fish5438
+No tags
+kiaxiko
+No tags
+
+Head Moderator
+savitar02245
+No tags
+
+Moderator
+omarmokhtar.
+No tags
+alexmartz.
+No tags
+xqc.
+No tags
+killermachine_13
+No tags
+
+Helper Team
+chefjr73
+No tags
+squidy_322
+No tags
+.michal_w
+No tags
+hindustani_gamerfardin
+No tags
+xerodegreess
+No tags
+chaoscrusher.
+No tags
+harshxd073
+No tags
+itz_sitian
+No tags
+tanxim__
+No tags
+Last updated <t:1788259852:f>
+SLOA | ro_mihaiuRole icon, Manager — 9/1/26, 1:51 PM
+dang, gotta mention them
+SLOA | ro_mihaiuRole icon, Manager — 9/1/26, 5:43 PM
+m.help
+mihulishRole icon, Bots
+APP
+ — 9/1/26, 5:43 PM
+Mihulish — Commands
+A dark, terminal-inspired Discord utility bot for moderation, staff management, tickets, and LOA/SLOA.
+
+Commands can be used via slash commands (/command) or server prefix (m.command).
+Server prefix: m.
+🛡️ Moderation
+warn — Warn a member with a reason
+unwarn — Remove a warning from a member
+warns — View warning history for a member
+warnings — View recent server-wide warnings
+mute — Timeout a member for specified minutes
+unmute — Remove timeout from a member
+kick — Kick a member from the server
+ban — Ban a member from the server
+unban — Unban a user from the server
+softban — Softban a member (ban and prune messages)
+bans — List active server bans
+📋 Staff & Leave
+staff — List or manage configured staff members
+loa — Manage leave of absence status, rules, or list
+sloa — Manage semi leave of absence status, rules, or list
+tag — Manage staff expertise tags and assignments
+🎫 Tickets
+claim — Claim the current support ticket
+transfer — Transfer ticket to another staff member
+unclaim — Release claim on the current ticket
+⚙️ Utility & Settings
+help — Learn about Mihulish and show all commands
+prefix — Check current server prefix
+settings — View or configure server roles, channels, and prefix
+invite — Get the bot invite link
+vote — Vote for this server and grow the streak
+votes — View the server vote streak
+mihulishRole icon, Bots
+APP
+ — 9/1/26, 7:38 PM
+Configured staff
+TheySix
+@TheySix (theysix)
+No tags
+
+Manager
+@SLOA | ro_mihaiu (ro_mihaiu) - LOA
+No tags
+@Catrooper (catrooper)
+No tags
+@Talha (talhamolla_777)
+No tags
+@notMik (.notmik)
+No tags
+
+Admin
+@Amethyst (honeysucking)
+No tags
+@Mister Fish (fish5438)
+No tags
+@kiaxiko (kiaxiko)
+No tags
+
+Head Moderator
+@savage pop tart (savitar02245)
+No tags
+
+Moderator
+@Omar Mokhtar (omarmokhtar.)
+No tags
+@Alex (alexmartz.)
+No tags
+@xqc (xqc.)
+No tags
+@killermachine_13 (killermachine_13)
+No tags
+
+Helper Team
+@Chefjr73 (chefjr73)
+No tags
+@SLOA | Squidy_787 (squidy_322)
+No tags
+@͘.michal_w (.michal_w)
+No tags
+@SLOA | hindustani_gamer_fardin (hindustani_gamerfardin)
+No tags
+@LOA | xerodegreess (xerodegreess)
+No tags
+@[AFK] chaoscrusher_. (chaoscrusher.)
+No tags
+@harsh (harshxd073)
+No tags
+@🔥 Itz_sitian (itz_sitian)
+No tags
+@tanxim__ (tanxim__)
+No tags
+Last updated <t:1788259852:f>
+SLOA | ro_mihaiuRole icon, Manager — 9/1/26, 7:39 PM
+hm better
+mihulishRole icon, Bots
+APP
+ — 9/1/26, 8:35 PM
+Configured staff
+TheySix
+@TheySix (theysix)
+No tags
+
+Manager
+@SLOA | ro_mihaiu (ro_mihaiu) - LOA
+No tags
+@Catrooper (catrooper)
+No tags
+@Talha (talhamolla_777)
+No tags
+@notMik (.notmik)
+No tags
+
+Admin
+@Amethyst (honeysucking)
+No tags
+@Mister Fish (fish5438)
+No tags
+@kiaxiko (kiaxiko)
+No tags
+
+Head Moderator
+@savage pop tart (savitar02245)
+No tags
+
+Moderator
+@Omar Mokhtar (omarmokhtar.)
+No tags
+@Alex (alexmartz.)
+No tags
+@xqc (xqc.)
+No tags
+@killermachine_13 (killermachine_13)
+No tags
+
+Helper Team
+@Chefjr73 (chefjr73)
+No tags
+@SLOA | Squidy_787 (squidy_322)
+No tags
+@͘.michal_w (.michal_w)
+No tags
+@SLOA | hindustani_gamer_fardin (hindustani_gamerfardin)
+No tags
+@LOA | xerodegreess (xerodegreess)
+No tags
+@[AFK] chaoscrusher_. (chaoscrusher.)
+No tags
+@harsh (harshxd073)
+No tags
+@🔥 Itz_sitian (itz_sitian)
+No tags
+@tanxim__ (tanxim__)
+No tags
+Last updated September 1, 2026 at 1:50 PM
+CatrooperRole icon, Manager — 9/1/26, 8:36 PM
+W
+SLOA | ro_mihaiuRole icon, Manager — 9/1/26, 8:37 PM
+CAT IS PROUD OF ME
+:/
+rare moment btw ^^
+DynoRole icon, Bots
+APP
+ — 9/2/26, 1:42 PM
+:dynoSuccess: iambored99 has been warned. || dont advertise that type of content
+DynoRole icon, Bots
+APP
+ — 9/2/26, 8:54 PM
+:dynoSuccess: silentmeteor429. was banned. | dont promote this kind of content here

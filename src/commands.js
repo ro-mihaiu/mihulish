@@ -110,6 +110,14 @@ function staffStatusLine(row) {
   }
   return `<@${row.user_id}> — \`${status}\`${details ? ` — ${details}` : ""}`;
 }
+// Display-order rank for imported role names when no live Discord role is mapped.
+const ROLE_NAME_RANK = [
+  "TheySix", "Manager", "Admin", "Head Moderator", "Moderator", "Helper Team",
+];
+function roleNameRank(name) {
+  const idx = ROLE_NAME_RANK.indexOf(name);
+  return idx === -1 ? -1 : ROLE_NAME_RANK.length - idx;
+}
 async function buildStaffDirectory(guild) {
   const rows = store.listStaffStatuses(guild.id);
   if (!rows.length) return embed("Configured staff", "No staff configured.");
@@ -120,8 +128,11 @@ async function buildStaffDirectory(guild) {
   const grouped = new Map();
   for (const [row, member] of members) {
     const role = row.role_id ? guild.roles.cache.get(row.role_id) : null;
-    const roleName = role?.name || "No role";
-    const position = role?.position || 0;
+    // Imported rosters keep their role_name hierarchy even when role_id maps to
+    // a generic role (e.g. the shared Staff role).
+    const rank = roleNameRank(row.role_name);
+    const roleName = row.role_name || role?.name || "No role";
+    const position = rank >= 0 ? rank : role?.position || 0;
     const tags = store.userTags(guild.id, row.user_id).map((tag) => tag.display_name);
     const status = row.loa_active ? "LOA" : row.sloa_active ? "SLOA" : "";
     const username = member?.user.username || `Unknown user (${row.user_id})`;
@@ -1672,12 +1683,18 @@ const DN_COOLDOWN_MS = 2 * 60 * 1000;
 
 const dnCmd = new SlashCommandBuilder()
   .setName("dn")
-  .setDescription("Look up a farm and get its link in your DMs")
+  .setDescription("Look up a farm and get its link")
   .addStringOption((o) =>
     o.setName("dn").setDescription("Farm identifier, for example ABC123").setRequired(true),
+  )
+  .addStringOption((o) =>
+    o.setName("send")
+      .setDescription("Where to send the farm link (default: DMs)")
+      .addChoices({ name: "here", value: "here" }, { name: "dms", value: "dms" }),
   );
 add(dnCmd, "Farms", "Everyone", async (i) => {
   const dn = i.options.getString("dn").trim();
+  const send = i.options.getString("send") || "dms";
   const farm = store.getFarm(i.guildId, dn);
   if (!farm)
     // Not found: no cooldown consumed — typos shouldn't burn the 2-minute wait.
@@ -1697,6 +1714,12 @@ add(dnCmd, "Farms", "Everyone", async (i) => {
     farm.video_title || `Farm ${dn}`,
     farm.type ? `Farm type: ${farm.type}` : "All farm links are on the page below.",
   ).setURL(siteUrl);
+
+  if (send === "here") {
+    store.setDnCooldown(i.user.id);
+    return respond(i, { components: [dmEmbed] });
+  }
+
   try {
     await i.user.send({ embeds: [dmEmbed] });
   } catch {

@@ -6,6 +6,13 @@ const DATABASE_PATH = path.resolve(
   process.env.DATABASE_URL || "./data/mihulish.db",
 );
 
+// Privacy gate: this deployment stores and serves database data for a single
+// guild only. Every write path checks this before touching the database.
+const ALLOWED_GUILD_ID = "985227944236568606";
+function isAllowedGuild(guildId) {
+  return guildId === ALLOWED_GUILD_ID;
+}
+
 fs.mkdirSync(path.dirname(DATABASE_PATH), { recursive: true });
 
 const db = new DatabaseSync(DATABASE_PATH);
@@ -99,6 +106,12 @@ try {
 } catch (error) {
   if (!error.message.includes("duplicate column name")) throw error;
 }
+// Optional display-only role name (used when the live Discord role isn't mapped).
+try {
+  db.exec("ALTER TABLE staff ADD COLUMN role_name TEXT");
+} catch (error) {
+  if (!error.message.includes("duplicate column name")) throw error;
+}
 try {
   db.exec("CREATE INDEX IF NOT EXISTS farms_type ON farms(guild_id, type, created_at)");
 } catch {}
@@ -110,7 +123,37 @@ try {
 
 const DEFAULT_TICKET_PANELS = ["java", "br", "bug", "report", "partnership"];
 
+// One-time farm seed for the allowed guild from farms_builds.jsonl.
+// Idempotent: existing farm rows (e.g. manager-curated links) are never overwritten.
+try {
+  const jsonlPath = path.resolve(__dirname, "../farms_builds.jsonl");
+  if (fs.existsSync(jsonlPath)) {
+    const seen = new Set(
+      db.prepare("SELECT dn FROM farms WHERE guild_id=?").all(ALLOWED_GUILD_ID).map((r) => r.dn),
+    );
+    let seeded = 0;
+    for (const line of fs.readFileSync(jsonlPath, "utf8").split("\n")) {
+      if (!line.trim()) continue;
+      let row;
+      try { row = JSON.parse(line); } catch { continue; }
+      if (!row?.dn || seen.has(row.dn)) continue;
+      upsertFarm(ALLOWED_GUILD_ID, row.dn, {
+        video: row.video_link || null,
+        video_title: row.title || null,
+        world: row.world_link || null,
+        schematic: row.schematic_link || null,
+        created_at: row.upload_date ? Date.parse(row.upload_date) || undefined : undefined,
+      }, null);
+      seeded++;
+    }
+    if (seeded) console.log(`[database] seeded ${seeded} farm(s) from farms_builds.jsonl`);
+  }
+} catch (error) {
+  console.error("[database] farm seed failed:", error.message);
+}
+
 function ensureGuild(guildId) {
+  if (!isAllowedGuild(guildId)) return;
   db.prepare("INSERT OR IGNORE INTO guilds VALUES (?, ?)").run(
     guildId,
     Date.now(),
@@ -126,6 +169,7 @@ function ensureGuild(guildId) {
   }
 }
 function settings(guildId) {
+  if (!isAllowedGuild(guildId)) return {};
   ensureGuild(guildId);
   return db
     .prepare("SELECT * FROM guild_settings WHERE guild_id=?")
@@ -203,6 +247,7 @@ function getStaffDirectoryUpdatedAt(g) {
   return settings(g).staff_updated_at || null;
 }
 function setLeave(table, g, u, active, reason, availability, endsAt) {
+  if (!isAllowedGuild(g)) return null;
   ensureGuild(g);
   const cols =
     table === "loa"
@@ -246,11 +291,12 @@ function isStaff(g, u) {
     .prepare("SELECT 1 FROM staff WHERE guild_id=? AND user_id=?")
     .get(g, u);
 }
-function upsertStaff(g, u, r, a) {
+function upsertStaff(g, u, r, a, roleName = null) {
   ensureGuild(g);
   db.prepare(
-    "INSERT INTO staff VALUES(?,?,?,?,?) ON CONFLICT(guild_id,user_id) DO UPDATE SET role_id=excluded.role_id",
-  ).run(g, u, r, a, Date.now());
+    "INSERT INTO staff(guild_id,user_id,role_id,added_by,created_at,role_name) VALUES(?,?,?,?,?,?) " +
+      "ON CONFLICT(guild_id,user_id) DO UPDATE SET role_id=excluded.role_id,role_name=COALESCE(excluded.role_name,staff.role_name)",
+  ).run(g, u, r, a, Date.now(), roleName);
   touchStaffDirectory(g);
 }
 function removeStaff(g, u) {
@@ -273,6 +319,7 @@ function listStaffStatuses(g) {
     .all(g);
 }
 function tag(g, name, display = name) {
+  if (!isAllowedGuild(g)) return null;
   ensureGuild(g);
   db.prepare(
     "INSERT OR IGNORE INTO tags(guild_id,name,display_name,created_at) VALUES(?,?,?,?)",
@@ -306,6 +353,7 @@ function ticket(g, c) {
     .get(g, c);
 }
 function saveTicket(g, c, p, user, status) {
+  if (!isAllowedGuild(g)) return null;
   ensureGuild(g);
   db.prepare(
     "INSERT INTO tickets(guild_id,channel_id,panel,ticket_user_id,status,created_at) VALUES(?,?,?,?,?,?) ON CONFLICT(guild_id,channel_id) DO UPDATE SET panel=excluded.panel,ticket_user_id=COALESCE(excluded.ticket_user_id,tickets.ticket_user_id),status=excluded.status,closed_at=CASE WHEN excluded.status='CLOSED' THEN COALESCE(tickets.closed_at,excluded.closed_at) ELSE NULL END",
@@ -325,6 +373,7 @@ function deleteTicket(g, c) {
   db.prepare("DELETE FROM tickets WHERE guild_id=? AND channel_id=?").run(g, c);
 }
 function addStaffTag(g, name, u, by) {
+  if (!isAllowedGuild(g)) return;
   const t = tag(g, name);
   db.prepare(
     "INSERT OR IGNORE INTO staff_tags(guild_id,tag_id,user_id,assigned_by,created_at) VALUES(?,?,?,?,?)",
@@ -342,6 +391,7 @@ function removeAllStaffTags(g, u) {
   touchStaffDirectory(g);
 }
 function saveOriginalNickname(g, u, nickname) {
+  if (!isAllowedGuild(g)) return;
   db.prepare(
     "INSERT OR REPLACE INTO original_nicknames(guild_id,user_id,nickname) VALUES(?,?,?)",
   ).run(g, u, nickname);
@@ -433,6 +483,7 @@ function getSticky(guildId, channelId) {
     .get(guildId, channelId);
 }
 function setSticky(guildId, channelId, content, format = "plain", embedJson = null) {
+  if (!isAllowedGuild(guildId)) return null;
   ensureGuild(guildId);
   let stickyId;
   do {
@@ -526,6 +577,7 @@ function getFarm(guildId, dn) {
     .get(guildId, dn);
 }
 function upsertFarm(guildId, dn, fields, updatedBy) {
+  if (!isAllowedGuild(guildId)) return { farm: null, changed: {}, isNew: false };
   ensureGuild(guildId);
   const current = getFarm(guildId, dn);
   const now = Date.now();
@@ -613,6 +665,7 @@ function rotateFarmChangelog(guildId) {
   return { current, previous: state.last_exported_changes };
 }
 function upsertFarmSuggestion(guildId, { dn = null, kind, url = null, title = null, messageId = null }) {
+  if (!isAllowedGuild(guildId)) return null;
   ensureGuild(guildId);
   // try to merge into an existing partial suggestion (same dn, same kind)
   const existing = db
