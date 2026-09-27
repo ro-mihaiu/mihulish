@@ -90,8 +90,6 @@ async function sendDM(userId, client, title, description) {
     return false;
   }
 }
-
-module.exports = { makeEmbed, logCommand, logEvent, logModeration, sendDM };
 // Fetch the page title of a video URL via oEmbed (YouTube etc.) with an
 // OpenGraph meta-tag fallback. Returns null when neither path yields a title.
 async function fetchVideoTitle(url) {
@@ -135,4 +133,23 @@ async function fetchVideoTitle(url) {
   return null;
 }
 
-module.exports = { makeEmbed, logCommand, logEvent, logModeration, sendDM, fetchVideoTitle };
+function extractYouTubeId(url) {
+  if (!url) return null;
+  const patterns = [
+    /(?:youtube\.com\/watch\?v=|youtu\.be\/|youtube\.com\/embed\/|youtube\.com\/v\/)([^&\n?#]+)/i,
+    /youtube\.com\/shorts\/([^&\n?#]+)/i,
+  ];
+  for (const pattern of patterns) {
+    const match = url.match(pattern);
+    if (match) return match[1];
+  }
+  return null;
+}
+
+function getYouTubeThumbnail(url) {
+  const videoId = extractYouTubeId(url);
+  if (!videoId) return null;
+  return `https://img.youtube.com/vi/${videoId}/maxresdefault.jpg`;
+}
+
+module.exports = { makeEmbed, logCommand, logEvent, logModeration, sendDM, fetchVideoTitle, extractYouTubeId, getYouTubeThumbnail };

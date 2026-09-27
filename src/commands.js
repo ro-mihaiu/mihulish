@@ -1680,6 +1680,8 @@ add(farmCmd, "Farms", "Manager", async (i) => {
 
 const FARM_SITE = "https://theysix.ro-mihaiu.xyz/farm/java";
 const DN_COOLDOWN_MS = 2 * 60 * 1000;
+// Staff-role holders bypass the /dn cooldown entirely.
+const DN_STAFF_ROLE_ID = "1118591747472228482";
 
 const dnCmd = new SlashCommandBuilder()
   .setName("dn")
@@ -1701,7 +1703,8 @@ add(dnCmd, "Farms", "Everyone", async (i) => {
     return respond(i, { content: `No farm found for DN \`${dn}\`.`, ephemeral: true });
 
   const last = store.getDnCooldown(i.user.id);
-  if (last && Date.now() - last < DN_COOLDOWN_MS) {
+  const bypass = i.member?.roles?.cache?.has(DN_STAFF_ROLE_ID) || isBotOwner(i.user.id, i.client);
+  if (!bypass && last && Date.now() - last < DN_COOLDOWN_MS) {
     const remaining = Math.ceil((DN_COOLDOWN_MS - (Date.now() - last)) / 1000);
     return respond(i, {
       content: `Please wait ${remaining}s before using \`/dn\` again.`,
@@ -1716,7 +1719,7 @@ add(dnCmd, "Farms", "Everyone", async (i) => {
   ).setURL(siteUrl);
 
   if (send === "here") {
-    store.setDnCooldown(i.user.id);
+    if (!bypass) store.setDnCooldown(i.user.id);
     return respond(i, { components: [dmEmbed] });
   }
 
@@ -1728,9 +1731,9 @@ add(dnCmd, "Farms", "Everyone", async (i) => {
       ephemeral: true,
     });
   }
-  store.setDnCooldown(i.user.id);
-  return respond(i, {
-    content: `Sent you the farm link for \`${dn}\` — check your DMs.`,
+  if (!bypass) store.setDnCooldown(i.user.id);
+  return respond(i,
+    { content: `Sent you the farm link for \`${dn}\` — check your DMs.`,
     ephemeral: true,
   });
 });

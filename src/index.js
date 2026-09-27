@@ -15,6 +15,7 @@ const {
 const { commands, store, farmPages, farmListEmbed } = require("./commands");
 const { handlePrefixMessage } = require("./prefix");
 const { logCommand, logEvent, sendDM } = require("./commands");
+const { getYouTubeThumbnail } = require("./utils");
 const logger = require("./logger");
 
 // One-shot importers are optional: if the import scripts/files were removed
@@ -159,6 +160,42 @@ async function maintainSticky(message) {
   }
 }
 client.on(Events.MessageCreate, maintainSticky);
+
+const DN_TYPO_REGEX = /(?:\/dn|dn|DN|:dn|:DN|\?dn|\?DN)\s*[:]?\s*(\d+)/i;
+const DN_CHANNEL_ID = "1107506735897395332";
+
+async function handleDnTypoMessage(message) {
+  if (!message.guild || message.author.bot) return;
+  if (message.channel.id !== DN_CHANNEL_ID) return;
+
+  const match = message.content.match(DN_TYPO_REGEX);
+  if (!match) return;
+
+  const dn = match[1];
+  const farm = require("./database").getFarm(message.guild.id, dn);
+  if (!farm) return;
+
+  const siteUrl = `https://theysix.ro-mihaiu.xyz/farm/java/${encodeURIComponent(dn)}`;
+  const thumbnailUrl = getYouTubeThumbnail(farm.video);
+
+  const embed = new (require("discord.js").EmbedBuilder)()
+    .setColor(0xe91e63)
+    .setTitle(farm.video_title || `Farm ${dn}`)
+    .setDescription(farm.type ? `Farm type: ${farm.type}` : "All farm links are on the page below.")
+    .setURL(siteUrl);
+
+  if (thumbnailUrl) {
+    embed.setImage(thumbnailUrl);
+  }
+
+  await message.reply({ embeds: [embed] }).catch(() => {});
+}
+
+client.on(Events.MessageCreate, (message) => {
+  handleDnTypoMessage(message).catch((e) =>
+    console.error("[dn-typo]", e.message),
+  );
+});
 
 client.on(Events.MessageCreate, async (message) => {
   if (message.author.bot || !message.guild) return;

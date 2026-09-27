@@ -11,6 +11,7 @@ const {
   staffCheck,
   managerCheck,
   isBotOwner,
+  DN_STAFF_ROLE_ID,
   stamp,
   logCommand,
   logModeration,
@@ -1236,7 +1237,10 @@ async function handlePrefixMessage(message) {
     const farm = store.getFarm(message.guild.id, dn);
     if (!farm) return reply(message, `No farm found for DN \`${dn}\`.`);
     const last = store.getDnCooldown(message.author.id);
-    if (last && Date.now() - last < 2 * 60 * 1000) {
+    const bypass =
+      message.member?.roles?.cache?.has(DN_STAFF_ROLE_ID) ||
+      isBotOwner(message.author.id, message.client);
+    if (!bypass && last && Date.now() - last < 2 * 60 * 1000) {
       const remaining = Math.ceil((2 * 60 * 1000 - (Date.now() - last)) / 1000);
       return reply(message, `Please wait ${remaining}s before using \`${p}dn\` again.`);
     }
@@ -1253,7 +1257,7 @@ async function handlePrefixMessage(message) {
     } catch {
       return reply(message, `Couldn't DM you (your DMs may be closed) — here's the link: ${siteUrl}`);
     }
-    store.setDnCooldown(message.author.id);
+    if (!bypass) store.setDnCooldown(message.author.id);
     return reply(message, `Sent you the farm link for \`${dn}\` — check your DMs.`);
   }
 
