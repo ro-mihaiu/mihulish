@@ -16,7 +16,14 @@ const { commands, store, farmPages, farmListEmbed } = require("./commands");
 const { handlePrefixMessage } = require("./prefix");
 const { logCommand, logEvent, sendDM } = require("./commands");
 const logger = require("./logger");
-const { runStaffImport } = require("../scripts/import-staff-once");
+
+// One-shot importers are optional: if the import scripts/files were removed
+// after a successful run, the bot still boots normally.
+let runStaffImport = null;
+const staffImporterPath = path.resolve(__dirname, "../scripts/import-staff-once.js");
+if (fs.existsSync(staffImporterPath)) {
+  ({ runStaffImport } = require(staffImporterPath));
+}
 
 const oneShotFarmImporter = path.resolve(__dirname, "../scripts/import-farms-once.js");
 if (fs.existsSync(oneShotFarmImporter)) require(oneShotFarmImporter);
@@ -52,9 +59,11 @@ client.once(Events.ClientReady, async (c) => {
   logger.log(`[mihulish] ready as ${c.user.tag}`);
   await c.application?.fetch().catch(() => {});
   for (const g of c.guilds.cache.values()) store.ensureGuild(g.id);
-  await runStaffImport(c).catch((e) =>
-    console.error("[staff-import]", e.message),
-  );
+  if (runStaffImport) {
+    await runStaffImport(c).catch((e) =>
+      console.error("[staff-import]", e.message),
+    );
+  }
   // Prefer CLIENT_ID when set; otherwise fall back to the verified bot user ID
   // so registration still works when .env / panel env vars are incomplete.
   const applicationId = process.env.CLIENT_ID || c.user.id;
