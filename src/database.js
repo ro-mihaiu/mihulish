@@ -112,6 +112,11 @@ try {
   if (!error.message.includes("duplicate column name")) throw error;
 }
 try {
+  db.exec("ALTER TABLE guild_settings ADD COLUMN dn_link_style TEXT");
+} catch (error) {
+  if (!error.message.includes("duplicate column name")) throw error;
+}
+try {
   db.exec("CREATE INDEX IF NOT EXISTS farms_type ON farms(guild_id, type, created_at)");
 } catch {}
 try {
@@ -189,6 +194,7 @@ function updateSettings(guildId, values) {
     "log_channel_id",
     "prefix",
     "appeal_link",
+    "dn_link_style",
   ];
 
   for (const key of allowedKeys) {

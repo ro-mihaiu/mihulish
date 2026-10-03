@@ -14,6 +14,8 @@ const {
   DN_STAFF_ROLE_ID,
   buildDnEmbed,
   dnMissMessage,
+  dnLinkStyle,
+  DN_LINK_STYLES,
   pingStaleTickets,
   formatIdle,
   stamp,
@@ -48,8 +50,19 @@ function reply(message, payload) {
     options.components = options.components.filter((component) => !component.data?.title);
     if (!options.components.length) delete options.components;
   }
-  return message.reply(options).catch((error) => {
+  return message.reply(options).catch(async (error) => {
+    // A deleted trigger message makes the implicit reply reference invalid; retry
+    // once without it so the command still answers.
+    if (/MESSAGE_REFERENCE_UNKNOWN_MESSAGE/.test(error?.message ?? "")) {
+      try {
+        return await message.channel.send({ ...options, messageReference: undefined });
+      } catch (retryError) {
+        console.error("[prefix] failed to reply:", retryError.message);
+        return null;
+      }
+    }
     console.error("[prefix] failed to reply:", error.message);
+    return null;
   });
 }
 
@@ -1249,12 +1262,46 @@ async function handlePrefixMessage(message) {
     }
     const siteUrl = `https://theysix.ro-mihaiu.xyz/farm/java/${encodeURIComponent(farm.dn)}`;
     try {
-      await message.author.send({ embeds: [await buildDnEmbed(farm)] });
+      const { embed: dnEmbed, row } = await buildDnEmbed(farm, message.guild.id);
+      await message.author.send({
+        embeds: [dnEmbed],
+        components: row ? [row] : [],
+      });
     } catch {
       return reply(message, `Couldn't DM you (your DMs may be closed) — here's the link: ${siteUrl}`);
     }
     if (!bypass) store.setDnCooldown(message.author.id);
     return reply(message, `Sent you the farm link for \`${farm.dn}\` — check your DMs.`);
+  }
+
+  if (command.name === "dnstyle") {
+    if (!managerCheck(message.guild.id, message.member, message.client)) {
+      return reply(message, "Only managers can change the /dn link style.");
+    }
+    const style = (command.arguments[0] || "").toLowerCase();
+    if (!style) {
+      return reply(message, {
+        components: [
+          embed(
+            "Current DN link style",
+            `\`${dnLinkStyle(message.guild.id)}\`\nSet it with \`${p}dnstyle <${DN_LINK_STYLES.join("|")}>\`.`,
+          ),
+        ],
+      });
+    }
+    if (!DN_LINK_STYLES.includes(style))
+      return reply(message, `Unknown style \`${style}\`. Valid: ${DN_LINK_STYLES.join(", ")}.`);
+    store.updateSettings(message.guild.id, { dn_link_style: style });
+    return reply(message, {
+      components: [
+        embed(
+          "DN link style updated",
+          style === "buttons"
+            ? "Farm embeds now show one button per link: red for the video, green for the schematic, blue for the world. The title is plain text."
+            : "Farm embeds now link the title to the farm page again, with no buttons.",
+        ),
+      ],
+    });
   }
 
   if (command.name === "cmd") {

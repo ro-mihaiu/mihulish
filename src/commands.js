@@ -1695,7 +1695,7 @@ add(farmCmd, "Farms", "Manager", async (i) => {
         .setStyle(ButtonStyle.Secondary)
         .setDisabled(pages <= 1),
     );
-    farmPages.set(pageToken, { guildId, type, page: 0 });
+    farmPages.set(pageToken, { guildId: i.guildId, type, page: 0 });
     return respond(i, {
       components: [farmListEmbed(i.guildId, farms, 0, perPage, type), row],
       ephemeral: true,
@@ -1781,17 +1781,65 @@ async function dnAutocomplete(i) {
   }));
   return i.respond(choices);
 }
-// Shared embed for /dn (here + DMs) and `m.dn`: the title links to the farm
-// page and carries the YouTube thumbnail whenever the video has one.
-async function buildDnEmbed(farm) {
+// How a farm embed delivers its links.
+//   buttons — title is plain text, one coloured button per available link
+//   site    — legacy behaviour: the title links to the farm page, no buttons
+// `/dnstyle` switches between them per server; DN_LINK_STYLE sets the default.
+const DN_LINK_STYLES = ["buttons", "site"];
+const DN_DEFAULT_STYLE = DN_LINK_STYLES.includes(
+  (process.env.DN_LINK_STYLE || "").toLowerCase(),
+)
+  ? process.env.DN_LINK_STYLE.toLowerCase()
+  : "buttons";
+// Buttons go stale 10 minutes after the embed was posted or last used.
+const DN_BUTTON_TTL_MS = 10 * 60 * 1000;
+const DN_FARM_LINKS = [
+  { kind: "video", label: "YouTube video", style: ButtonStyle.Danger },
+  { kind: "schematic", label: "Schematic", style: ButtonStyle.Success },
+  { kind: "world", label: "World", style: ButtonStyle.Primary },
+];
+function dnLinkStyle(guildId) {
+  const stored = store.settings(guildId)?.dn_link_style;
+  return DN_LINK_STYLES.includes(stored) ? stored : DN_DEFAULT_STYLE;
+}
+// Buttons are not Link-styled on purpose: the click is handled by the bot so
+// the expiry can be enforced and the timer refreshed on each use.
+function dnButtonRow(farm, expiresAt, disabled = false) {
+  const row = new ActionRowBuilder();
+  for (const { kind, label, style } of DN_FARM_LINKS) {
+    if (!farm[kind]) continue;
+    row.addComponents(
+      new ButtonBuilder()
+        .setCustomId(`farm_dl|${farm.dn}|${kind}|${expiresAt}`)
+        .setLabel(label)
+        .setStyle(style)
+        .setDisabled(disabled),
+    );
+  }
+  return row.components.length ? row : null;
+}
+// Shared embed for /dn (here + DMs), `m.dn` and the DN channel: the title keeps
+// the video name, the thumbnail is attached when there is one, and the links are
+// reachable through coloured buttons.
+async function buildDnEmbed(farm, guildId = null) {
+  const style = guildId ? dnLinkStyle(guildId) : DN_DEFAULT_STYLE;
   const siteUrl = `${FARM_SITE}/${encodeURIComponent(farm.dn)}`;
+  const linked = style === "site";
   const built = embed(
     farm.video_title || `Farm ${farm.dn}`,
-    farm.type ? `Farm type: ${farm.type}` : "All farm links are on the page below.",
-  ).setURL(siteUrl);
+    farm.type
+      ? `Farm type: ${farm.type}`
+      : linked
+        ? "All farm links are on the page below."
+        : "Use the buttons below to get the files.",
+    linked ? 0xe91e63 : COLOR,
+  );
+  if (linked) built.setURL(siteUrl);
   const thumbnail = await resolveThumbnail(farm.video);
   if (thumbnail) built.setImage(thumbnail);
-  return built;
+  if (linked) return { embed: built, row: null };
+  const row = dnButtonRow(farm, Date.now() + DN_BUTTON_TTL_MS);
+  return { embed: built, row };
 }
 function dnMissMessage(guildId, rawDn) {
   const close = store.suggestFarms(guildId, rawDn, 5);
@@ -1824,15 +1872,16 @@ add(dnCmd, "Farms", "Everyone", async (i) => {
   }
 
   const siteUrl = `${FARM_SITE}/${encodeURIComponent(farm.dn)}`;
-  const dmEmbed = await buildDnEmbed(farm);
+  const { embed: dnEmbed, row } = await buildDnEmbed(farm, i.guildId);
+  const payload = { components: row ? [dnEmbed, row] : [dnEmbed] };
 
   if (send === "here") {
     if (!bypass) store.setDnCooldown(i.user.id);
-    return respond(i, { components: [dmEmbed] });
+    return respond(i, payload);
   }
 
   try {
-    await i.user.send({ embeds: [dmEmbed] });
+    await i.user.send({ embeds: [dnEmbed], components: row ? [row] : [] });
   } catch {
     return respond(i, {
       content: `Couldn't DM you (your DMs may be closed) — here's the link: ${siteUrl}`,
@@ -1841,11 +1890,40 @@ add(dnCmd, "Farms", "Everyone", async (i) => {
   }
   if (!bypass) store.setDnCooldown(i.user.id);
   return respond(i, {
-    content: `Sent you the farm link for \`${farm.dn}\` — check your DMs.`,
+    content: `Sent you the farm links for \`${farm.dn}\` — check your DMs.`,
     ephemeral: true,
   });
 });
 commands.find((c) => c.data.name === "dn").autocomplete = dnAutocomplete;
+
+const dnStyleCmd = new SlashCommandBuilder()
+  .setName("dnstyle")
+  .setDescription("Choose how farm links are delivered in /dn embeds")
+  .addStringOption((o) =>
+    o
+      .setName("style")
+      .setDescription("buttons = one coloured button per link; site = title links to the farm page")
+      .setRequired(true)
+      .addChoices(
+        { name: "buttons (video / schematic / world)", value: "buttons" },
+        { name: "site (link behind the title)", value: "site" },
+      ),
+  );
+add(dnStyleCmd, "Farms", "Manager", async (i) => {
+  if (!manager(i)) return deny(i, "Only managers can change the /dn link style.");
+  const style = i.options.getString("style");
+  store.updateSettings(i.guildId, { dn_link_style: style });
+  return respond(i, {
+    components: [
+      embed(
+        "DN link style updated",
+        style === "buttons"
+          ? "Farm embeds now show one button per link: red for the video, green for the schematic, blue for the world. The title is plain text."
+          : "Farm embeds now link the title to the farm page again, with no buttons.",
+      ),
+    ],
+  });
+});
 
 // ---------------- Per-guild wiki ----------------
 function isValidHttpUrl(value) {
@@ -2064,5 +2142,9 @@ module.exports = {
   formatIdle,
   buildDnEmbed,
   dnMissMessage,
+  dnLinkStyle,
+  dnButtonRow,
+  DN_BUTTON_TTL_MS,
+  DN_LINK_STYLES,
   FARM_TYPES,
 };

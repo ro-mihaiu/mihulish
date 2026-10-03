@@ -12,7 +12,7 @@ const {
   ButtonBuilder,
   ButtonStyle,
 } = require("discord.js");
-const { commands, store, farmPages, farmListEmbed, buildDnEmbed, pingStaleTickets } = require("./commands");
+const { commands, store, farmPages, farmListEmbed, buildDnEmbed, dnButtonRow, DN_BUTTON_TTL_MS, pingStaleTickets } = require("./commands");
 const { handlePrefixMessage } = require("./prefix");
 const { logCommand, logEvent, sendDM } = require("./commands");
 const logger = require("./logger");
@@ -178,8 +178,10 @@ async function handleDnTypoMessage(message) {
   const farm = store.getFarm(message.guild.id, dn);
   if (!farm) return;
 
-  const built = await buildDnEmbed(farm);
-  await message.reply({ embeds: [built] }).catch(() => {});
+  const { embed: built, row } = await buildDnEmbed(farm, message.guild.id);
+  await message
+    .reply({ embeds: [built], components: row ? [row] : [] })
+    .catch(() => {});
 }
 
 client.on(Events.MessageCreate, (message) => {
@@ -235,6 +237,51 @@ async function checkTicketReminders() {
 
 setInterval(checkTicketReminders, TICKET_SWEEP_INTERVAL_MS);
 
+// Farm link buttons on /dn embeds. The click is handled here rather than being a
+// Link button so the 10-minute expiry can be enforced, and so using a button
+// pushes the expiry back out — the timer only runs out after 10 idle minutes.
+client.on(Events.InteractionCreate, async (i) => {
+  if (!i.isButton() || !i.guildId) return;
+  const parts = i.customId.split("|");
+  if (parts[0] !== "farm_dl") return;
+  const [, dn, kind, expiresRaw] = parts;
+  const expiresAt = Number(expiresRaw);
+  const farm = store.getFarm(i.guildId, dn);
+  const url = farm?.[kind];
+  const label = kind === "video" ? "video" : kind === "world" ? "world" : "schematic";
+
+  if (!url) {
+    return i
+      .reply({
+        content: `That farm no longer has a ${label} link. Run \`/dn\` again for the current files.`,
+        ephemeral: true,
+        allowedMentions: { parse: [] },
+      })
+      .catch(() => {});
+  }
+  if (!Number.isFinite(expiresAt) || Date.now() > expiresAt) {
+    // Grey the row out so nobody keeps clicking a dead button.
+    i.update({ components: [dnButtonRow(farm, 0, true)].filter(Boolean) }).catch(() => {});
+    return i
+      .reply({
+        content: `These buttons expired after 10 minutes of inactivity. Run \`/dn ${dn}\` again for fresh links.`,
+        ephemeral: true,
+        allowedMentions: { parse: [] },
+      })
+      .catch(() => {});
+  }
+  await i
+    .update({ components: [dnButtonRow(farm, Date.now() + DN_BUTTON_TTL_MS)].filter(Boolean) })
+    .catch(() => {});
+  return i
+    .reply({
+      content: `**${farm.dn} — ${label}**\n${url}`,
+      ephemeral: true,
+      allowedMentions: { parse: [] },
+    })
+    .catch(() => {});
+});
+
 client.on(Events.InteractionCreate, async (i) => {
   if (!i.isChatInputCommand() || !i.guildId) return;
   const command = commands.find((c) => c.data.name === i.commandName);
@@ -265,6 +312,7 @@ client.on(Events.InteractionCreate, async (i) => {
   } catch (e) {
     logger.error(
       `[mihulish] someone ran /${i.commandName} in ${i.guildId} and got this error ${e.name}`,
+      e,
     );
     await i.editReply({
       content: "Mihulish could not complete that request.",
