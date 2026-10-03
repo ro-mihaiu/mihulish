@@ -42,20 +42,29 @@ const rest = new REST({ version: "10" }).setToken(
 );
 async function register(applicationId) {
   const body = commands.map((c) => c.data.toJSON());
+  const guildId = process.env.DISCORD_GUILD_ID;
   // Log which scope was used: a guild-scoped overwrite shows up immediately,
   // while a global one can take up to an hour to propagate to clients.
-  const scope = process.env.DISCORD_GUILD_ID
-    ? `guild ${process.env.DISCORD_GUILD_ID}`
+  const scope = guildId
+    ? `guild ${guildId}`
     : "global (can take up to an hour to appear)";
-  if (process.env.DISCORD_GUILD_ID)
+  if (guildId) {
     await rest.put(
-      Routes.applicationGuildCommands(
-        applicationId,
-        process.env.DISCORD_GUILD_ID,
-      ),
+      Routes.applicationGuildCommands(applicationId, guildId),
       { body },
     );
-  else await rest.put(Routes.applicationCommands(applicationId), { body });
+    // A global set registered before this guild was configured still exists
+    // and Discord keeps both, so every command shows up twice. Clear it.
+    const global = await rest
+      .get(Routes.applicationCommands(applicationId))
+      .catch(() => []);
+    if (global.length) {
+      await rest.delete(Routes.applicationCommands(applicationId));
+      logger.log(
+        `[commands] removed ${global.length} leftover global command(s) so they do not duplicate the guild ones`,
+      );
+    }
+  } else await rest.put(Routes.applicationCommands(applicationId), { body });
   logger.log(
     `[commands] registered ${body.length} commands for ${applicationId} (${scope})`,
   );
