@@ -42,6 +42,11 @@ const rest = new REST({ version: "10" }).setToken(
 );
 async function register(applicationId) {
   const body = commands.map((c) => c.data.toJSON());
+  // Log which scope was used: a guild-scoped overwrite shows up immediately,
+  // while a global one can take up to an hour to propagate to clients.
+  const scope = process.env.DISCORD_GUILD_ID
+    ? `guild ${process.env.DISCORD_GUILD_ID}`
+    : "global (can take up to an hour to appear)";
   if (process.env.DISCORD_GUILD_ID)
     await rest.put(
       Routes.applicationGuildCommands(
@@ -50,9 +55,10 @@ async function register(applicationId) {
       ),
       { body },
     );
-  else
-    await rest.put(Routes.applicationCommands(applicationId), { body });
-  console.log(`[commands] registered ${body.length} commands`);
+  else await rest.put(Routes.applicationCommands(applicationId), { body });
+  logger.log(
+    `[commands] registered ${body.length} commands for ${applicationId} (${scope})`,
+  );
 }
 client.once(Events.ClientReady, async (c) => {
   console.log(`[mihulish] ready as ${c.user.tag}`);
@@ -68,7 +74,10 @@ client.once(Events.ClientReady, async (c) => {
   // so registration still works when .env / panel env vars are incomplete.
   const applicationId = process.env.CLIENT_ID || c.user.id;
   await register(applicationId).catch((e) =>
-    console.error("[commands] registration failed:", e.message),
+    logger.error(
+      `[commands] registration failed for ${applicationId}`,
+      e,
+    ),
   );
 });
 client.on(Events.GuildCreate, (g) => {

@@ -23,6 +23,16 @@ const {
   logModeration,
   sendDM,
   FARM_TYPES,
+  resolveEmbedChannel,
+  usableEmbedChannel,
+  renderEmbedList,
+  postEmbed,
+  patchEmbed,
+  removeEmbed,
+  canManageEmbedAs,
+  embedManageGate,
+  embedResultEmbed,
+  EMBED_MAX_CONTENT,
 } = require("./commands");
 const { fetchVideoTitle } = require("./utils");
 
@@ -1332,6 +1342,169 @@ async function handlePrefixMessage(message) {
       return reply(message, { components: [embed("Custom commands", lines.join("\n"))] });
     }
     return reply(message, `Usage: \`${p}cmd <add|remove|list> [trigger] [content]\``);
+  }
+
+  // `/embed create` opens a modal, which a text command cannot do, so the
+  // prefix form takes the same three answers inline: channel, title, content.
+  if (command.name === "embed") {
+    const gate = embedManageGate(
+      message.author.id,
+      message.client,
+      message.member.permissions,
+    );
+    if (gate) return reply(message, gate);
+    const [sub, ...args] = command.arguments;
+    const guild = message.guild;
+
+    if (sub === "list") {
+      return reply(message, renderEmbedList(message.guild.id, guild));
+    }
+
+    if (sub === "delete" || sub === "remove") {
+      const id = args[0]?.trim();
+      if (!id) return reply(message, `Usage: \`${p}embed delete <id>\``);
+      const row = store.getEmbed(message.guild.id, id);
+      if (!row)
+        return reply(
+          message,
+          `No embed found with id \`${id}\`. Use \`${p}embed list\` to see them.`,
+        );
+      if (
+        !canManageEmbedAs(
+          message.author.id,
+          message.client,
+          message.member.permissions,
+          row,
+        )
+      )
+        return reply(
+          message,
+          `Only <@${row.author_id}> (the author) can delete this embed.`,
+        );
+      await removeEmbed(guild, row);
+      return reply(message, {
+        components: [
+          embed("Embed deleted", `\`${row.embed_id}\` was removed.`),
+        ],
+      });
+    }
+
+    if (sub !== "create" && sub !== "edit") {
+      return reply(
+        message,
+        `Usage: \`${p}embed create [channel] <title> || <content>\`\n` +
+          `\`${p}embed list\`\n` +
+          `\`${p}embed edit <id> [channel] <title> || <content>\`\n` +
+          `\`${p}embed delete <id>\`\n` +
+          `Use \`<title> || <content>\` to set both, or drop the \`||\` part to send content with no title.`,
+      );
+    }
+
+    let rest = args;
+    let existing = null;
+    if (sub === "edit") {
+      const id = rest[0]?.trim();
+      if (!id) return reply(message, `Usage: \`${p}embed edit <id> ...\``);
+      rest = rest.slice(1);
+      existing = store.getEmbed(message.guild.id, id);
+      if (!existing)
+        return reply(
+          message,
+          `No embed found with id \`${id}\`. Use \`${p}embed list\` to see them.`,
+        );
+      if (
+        !canManageEmbedAs(
+          message.author.id,
+          message.client,
+          message.member.permissions,
+          existing,
+        )
+      )
+        return reply(
+          message,
+          `Only <@${existing.author_id}> (the author) can edit this embed.`,
+        );
+    }
+
+// An optional leading channel, accepted in any notation as long as it really
+    // is a channel here. A `#name`/`<#id>`/bare id that does not resolve is an
+    // error rather than silently becoming the title; a bare word is kept as the
+    // title, since it could legitimately be one.
+    let channelArg = "";
+    if (rest[0]) {
+      const found = await resolveEmbedChannel(guild, rest[0], null);
+      if (found) {
+        channelArg = rest[0];
+        rest = rest.slice(1);
+      } else if (/^(?:<#|#|\d{15,25}$)/.test(rest[0])) {
+        return reply(
+          message,
+          `I could not find the channel \`${rest[0]}\` in this server.`,
+        );
+      }
+    }
+    // `<title> || <content>`, or just `<content>` for no title.
+    const joined = rest.join(" ");
+    const parts = joined.split(/\s*\|\|\s*/);
+    const hasTitle = parts.length > 1;
+    const title = hasTitle ? parts.shift().trim() : "";
+    const content = (hasTitle ? parts.join(" || ") : joined).trim();
+
+    if (!content)
+      return reply(
+        message,
+        `Provide the embed content. Usage: \`${p}embed ${sub}${
+          sub === "edit" ? " <id>" : ""
+        } [channel] <title> || <content>\``,
+      );
+    if (content.length > EMBED_MAX_CONTENT)
+      return reply(
+        message,
+        `That content is ${content.length} characters — the limit is ${EMBED_MAX_CONTENT}.`,
+      );
+    if (title.length > 256)
+      return reply(message, "That title is too long — the limit is 256 characters.");
+
+    const fallbackId = existing ? existing.channel_id : message.channel.id;
+    const channel = await resolveEmbedChannel(guild, channelArg, fallbackId);
+    const channelError = usableEmbedChannel(channel);
+    if (channelError) return reply(message, channelError);
+
+    try {
+      const outcome = existing
+        ? await patchEmbed({
+            client: message.client,
+            guild,
+            user: message.author,
+            row: existing,
+            channel,
+            title,
+            content,
+          })
+        : await postEmbed({
+            guild,
+            user: message.author,
+            channel,
+            title,
+            content,
+          });
+      if (!outcome.row)
+        return reply(message, {
+          components: [embed("Embed not saved", outcome.note)],
+        });
+      return reply(message, {
+        components: [
+          embedResultEmbed(
+            outcome.row,
+            channel,
+            outcome.note,
+            `Use \`${p}embed edit ${outcome.row.embed_id} ...\` or \`${p}embed delete ${outcome.row.embed_id}\`.`,
+          ),
+        ],
+      });
+    } catch (e) {
+      return reply(message, `I could not post the embed: ${e.message}`);
+    }
   }
 
   return reply(
