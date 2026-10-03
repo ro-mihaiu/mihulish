@@ -67,6 +67,9 @@ CREATE TABLE IF NOT EXISTS farm_suggestions (id INTEGER PRIMARY KEY AUTOINCREMEN
 CREATE TABLE IF NOT EXISTS guild_wikis (guild_id TEXT NOT NULL, article_name TEXT NOT NULL, link TEXT NOT NULL, created_by TEXT, created_at INTEGER NOT NULL, updated_at INTEGER, PRIMARY KEY (guild_id, article_name));
 CREATE UNIQUE INDEX IF NOT EXISTS guild_wikis_name ON guild_wikis(guild_id, article_name COLLATE NOCASE);
 CREATE TABLE IF NOT EXISTS custom_commands (guild_id TEXT NOT NULL, trigger TEXT NOT NULL, content TEXT NOT NULL, created_by TEXT, created_at INTEGER NOT NULL, PRIMARY KEY (guild_id, trigger));
+CREATE TABLE IF NOT EXISTS saved_embeds (guild_id TEXT NOT NULL, embed_id TEXT NOT NULL, channel_id TEXT NOT NULL, webhook_id TEXT, message_id TEXT, title TEXT, content TEXT, author_id TEXT, author_name TEXT, created_at INTEGER NOT NULL, updated_at INTEGER, PRIMARY KEY (guild_id, embed_id));
+CREATE INDEX IF NOT EXISTS saved_embeds_channel ON saved_embeds(guild_id, channel_id);
+CREATE TABLE IF NOT EXISTS embed_webhooks (guild_id TEXT NOT NULL, channel_id TEXT NOT NULL, webhook_id TEXT NOT NULL, webhook_token TEXT NOT NULL, created_at INTEGER NOT NULL, PRIMARY KEY (guild_id, channel_id));
 `);
 
 // Column migrations for pre-existing tables (must run after the CREATE TABLE
@@ -842,6 +845,117 @@ function listCustomCommands(guildId) {
     .prepare("SELECT * FROM custom_commands WHERE guild_id=? ORDER BY trigger COLLATE NOCASE")
     .all(guildId);
 }
+
+// ---------------- Saved embeds ----------------
+// Embeds are posted through a per-channel webhook so the message carries the
+// server name and icon instead of the bot's, and stay editable/deletable later.
+const EMBED_ID_CHARS =
+  "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+function randomEmbedId() {
+  let id = "";
+  for (let n = 0; n < 8; n++)
+    id += EMBED_ID_CHARS[Math.floor(Math.random() * EMBED_ID_CHARS.length)];
+  return id;
+}
+function getEmbed(guildId, embedId) {
+  if (!embedId) return null;
+  return db
+    .prepare(
+      "SELECT * FROM saved_embeds WHERE guild_id=? AND embed_id=? COLLATE NOCASE",
+    )
+    .get(guildId, embedId);
+}
+function createEmbed(
+  guildId,
+  {
+    channelId,
+    webhookId = null,
+    messageId = null,
+    title = null,
+    content = null,
+    authorId = null,
+    authorName = null,
+  },
+) {
+  if (!isAllowedGuild(guildId)) return null;
+  ensureGuild(guildId);
+  let embedId;
+  do {
+    embedId = randomEmbedId();
+  } while (getEmbed(guildId, embedId));
+  db.prepare(
+    "INSERT INTO saved_embeds (guild_id, embed_id, channel_id, webhook_id, message_id, title, content, author_id, author_name, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+  ).run(
+    guildId,
+    embedId,
+    channelId,
+    webhookId,
+    messageId,
+    title,
+    content,
+    authorId,
+    authorName,
+    Date.now(),
+  );
+  return getEmbed(guildId, embedId);
+}
+function listEmbeds(guildId) {
+  return db
+    .prepare(
+      "SELECT * FROM saved_embeds WHERE guild_id=? ORDER BY created_at DESC",
+    )
+    .all(guildId);
+}
+function updateEmbed(guildId, embedId, fields = {}) {
+  if (!isAllowedGuild(guildId)) return null;
+  const row = getEmbed(guildId, embedId);
+  if (!row) return null;
+  const allowedKeys = ["channel_id", "webhook_id", "message_id", "title", "content"];
+  const sets = [];
+  const args = [];
+  for (const key of allowedKeys) {
+    if (Object.prototype.hasOwnProperty.call(fields, key)) {
+      sets.push(`${key}=?`);
+      args.push(fields[key] || null);
+    }
+  }
+  if (!sets.length) return row;
+  sets.push("updated_at=?");
+  args.push(Date.now(), guildId, row.embed_id);
+  db.prepare(
+    `UPDATE saved_embeds SET ${sets.join(", ")} WHERE guild_id=? AND embed_id=?`,
+  ).run(...args);
+  return getEmbed(guildId, row.embed_id);
+}
+function deleteEmbed(guildId, embedId) {
+  const row = getEmbed(guildId, embedId);
+  if (!row) return null;
+  db.prepare("DELETE FROM saved_embeds WHERE guild_id=? AND embed_id=?").run(
+    guildId,
+    row.embed_id,
+  );
+  return row;
+}
+function getEmbedWebhook(guildId, channelId) {
+  return db
+    .prepare("SELECT * FROM embed_webhooks WHERE guild_id=? AND channel_id=?")
+    .get(guildId, channelId);
+}
+function setEmbedWebhook(guildId, channelId, webhookId, webhookToken) {
+  if (!isAllowedGuild(guildId)) return null;
+  db.prepare(
+    "INSERT INTO embed_webhooks (guild_id, channel_id, webhook_id, webhook_token, created_at) VALUES (?, ?, ?, ?, ?) " +
+      "ON CONFLICT(guild_id, channel_id) DO UPDATE SET webhook_id=excluded.webhook_id, webhook_token=excluded.webhook_token",
+  ).run(guildId, channelId, webhookId, webhookToken, Date.now());
+  return getEmbedWebhook(guildId, channelId);
+}
+function deleteEmbedWebhook(guildId, channelId) {
+  db.prepare("DELETE FROM embed_webhooks WHERE guild_id=? AND channel_id=?").run(
+    guildId,
+    channelId,
+  );
+}
+
 module.exports = {
   db,
   ensureGuild,
@@ -919,4 +1033,12 @@ module.exports = {
   removeCustomCommand,
   getCustomCommand,
   listCustomCommands,
+  getEmbed,
+  createEmbed,
+  listEmbeds,
+  updateEmbed,
+  deleteEmbed,
+  getEmbedWebhook,
+  setEmbedWebhook,
+  deleteEmbedWebhook,
 };

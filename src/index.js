@@ -12,7 +12,7 @@ const {
   ButtonBuilder,
   ButtonStyle,
 } = require("discord.js");
-const { commands, store, farmPages, farmListEmbed, buildDnEmbed, dnButtonRow, DN_BUTTON_TTL_MS, pingStaleTickets } = require("./commands");
+const { commands, store, farmPages, farmListEmbed, buildDnEmbed, dnButtonRow, DN_BUTTON_TTL_MS, pingStaleTickets, handleEmbedButton, handleEmbedModal } = require("./commands");
 const { handlePrefixMessage } = require("./prefix");
 const { logCommand, logEvent, sendDM } = require("./commands");
 const logger = require("./logger");
@@ -334,6 +334,24 @@ client.on(Events.InteractionCreate, async (i) => {
     await command.autocomplete(i);
   } catch (e) {
     console.error("[autocomplete]", i.commandName, e.message);
+  }
+});
+
+// `/embed` opens a modal form instead of taking options, so its button and
+// modal-submit interactions live outside the slash-command dispatcher.
+client.on(Events.InteractionCreate, async (i) => {
+  if (!i.isButton() && !i.isModalSubmit()) return;
+  if (!i.guildId) return;
+  try {
+    await handleEmbedButton(i);
+    await handleEmbedModal(i);
+  } catch (e) {
+    console.error("[embed]", e.message);
+    if (i.isRepliable() && !i.replied && !i.deferred) {
+      await i
+        .reply({ content: "Mihulish could not complete that embed request.", ephemeral: true })
+        .catch(() => {});
+    }
   }
 });
 

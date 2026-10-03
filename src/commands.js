@@ -5,6 +5,10 @@ const {
   ActionRowBuilder,
   ButtonBuilder,
   ButtonStyle,
+  ModalBuilder,
+  TextInputBuilder,
+  TextInputStyle,
+  MessageFlags,
 } = require("discord.js");
 const fs = require("fs");
 const path = require("path");
@@ -255,6 +259,7 @@ function buildHelpEmbed(prefix = "m.") {
         { name: "settings", desc: "View or configure server roles, channels, and prefix" },
         { name: "link", desc: "Set an appeal link" },
         { name: "sticky", desc: "Manage a sticky message in a channel" },
+        { name: "embed", desc: "Create and manage saved embed messages" },
         { name: "invite", desc: "Get the bot invite link" },
       ],
     },
@@ -2128,6 +2133,550 @@ add(cmdCmd, "Utility", "Manage Messages", async (i) => {
   });
 });
 
+// ---------------- Saved embeds ----------------
+// Embeds are posted through a per-channel webhook that is named and dressed
+// after the server, so the resulting message looks native instead of carrying
+// the bot's own name and avatar. Only the author (or a bot owner / admin) can
+// change or remove an embed afterwards.
+const EMBED_FORM_CREATE = "embedform_create";
+const EMBED_FORM_EDIT = "embedform_edit";
+const EMBED_LIST_LIMIT = 25;
+const EMBED_MAX_CONTENT = 4000;
+
+function pad2(n) {
+  return String(n).padStart(2, "0");
+}
+// Footer date, e.g. 03/10/2026. UTC so the stored date is stable across hosts.
+function embedDate(t) {
+  const d = new Date(t);
+  return `${pad2(d.getUTCDate())}/${pad2(d.getUTCMonth() + 1)}/${d.getUTCFullYear()}`;
+}
+function embedAuthorName(user) {
+  return (
+    user?.displayName ||
+    user?.globalName ||
+    user?.username ||
+    user?.tag ||
+    (user?.id ? `<@${user.id}>` : "unknown")
+  );
+}
+function embedPfp(user) {
+  return user?.displayAvatarURL?.({ size: 128, extension: "png" }) || null;
+}
+// The message always presents itself as the server: server name as author,
+// server icon as author icon + thumbnail, regardless of who posts it.
+function buildEmbedMessage(guild, { title, content, author, createdAt }) {
+  const icon = guild.iconURL({ size: 256, extension: "png" });
+  const built = new EmbedBuilder().setColor(COLOR);
+  if (title) built.setTitle(String(title).slice(0, 256));
+  if (content) built.setDescription(String(content).slice(0, EMBED_MAX_CONTENT));
+  built.setAuthor({ name: guild.name, ...(icon ? { iconURL: icon } : {}) });
+  if (icon) built.setThumbnail(icon);
+  const pfp = embedPfp(author);
+  built.setFooter({
+    text: `Sent by ${embedAuthorName(author)} at ${embedDate(createdAt)}`,
+    ...(pfp ? { iconURL: pfp } : {}),
+  });
+  if (guild.id) built.setTimestamp(new Date(createdAt));
+  return built;
+}
+async function resolveEmbedChannel(guild, raw, fallbackId) {
+  const cleaned = String(raw ?? "").trim().replace(/^<#|>$/g, "");
+  if (!cleaned) {
+    if (!fallbackId) return null;
+    return (
+      guild.channels.cache.get(fallbackId) ||
+      (await guild.channels.fetch(fallbackId).catch(() => null))
+    );
+  }
+  if (/^\d{15,25}$/.test(cleaned))
+    return (
+      guild.channels.cache.get(cleaned) ||
+      (await guild.channels.fetch(cleaned).catch(() => null))
+    );
+  const name = cleaned.replace(/^#/, "").toLowerCase();
+  return guild.channels.cache.find((c) => c.name?.toLowerCase() === name) || null;
+}
+function channelMention(guild, channelId) {
+  if (!channelId) return "";
+  return guild?.channels?.cache?.has(channelId) ? `<#${channelId}>` : "";
+}
+function usableEmbedChannel(channel) {
+  if (!channel) return "I could not find that channel in this server.";
+  if (typeof channel.isTextBased === "function" && !channel.isTextBased())
+    return "Embeds can only be sent to text channels.";
+  if (typeof channel.isVoiceBased === "function" && channel.isVoiceBased())
+    return "Embeds can only be sent to text channels.";
+  if (typeof channel.manageWebhooks === "boolean" && !channel.manageWebhooks)
+    return "I need **Manage Webhooks** in that channel to post embeds there.";
+  return null;
+}
+async function ensureEmbedWebhook(guild, channel) {
+  const guildId = guild.id;
+  const cached = store.getEmbedWebhook(guildId, channel.id);
+  const icon = guild.iconURL({ size: 256, extension: "png" });
+  if (cached?.webhook_id) {
+    const existing = await guild.webhooks
+      .fetch(cached.webhook_id)
+      .catch(() => null);
+    if (existing) return existing;
+    store.deleteEmbedWebhook(guildId, channel.id);
+  }
+  const hook = await channel.createWebhook({
+    name: guild.name.slice(0, 80),
+    ...(icon ? { avatar: icon } : {}),
+    reason: `Mihulish embeds in #${channel.name}`,
+  });
+  store.setEmbedWebhook(guildId, channel.id, hook.id, hook.token);
+  return hook;
+}
+function embedFormModal({ customId, channelLabel, title, content }) {
+  // Only pre-fill fields that actually hold something, so an untouched form
+  // does not submit empty strings that look like real values.
+  const field = (customId, label, style, maxLength, required, value) => {
+    const input = new TextInputBuilder()
+      .setCustomId(customId)
+      .setLabel(label)
+      .setStyle(style)
+      .setMaxLength(maxLength)
+      .setRequired(required);
+    if (value) input.setValue(String(value));
+    return new ActionRowBuilder().addComponents(input);
+  };
+  return new ModalBuilder()
+    .setCustomId(customId)
+    .setTitle(customId.startsWith(EMBED_FORM_EDIT) ? "Edit embed" : "Create embed")
+    .addComponents(
+      field(
+        "channel",
+        "Channel",
+        TextInputStyle.Short,
+        100,
+        false,
+        channelLabel,
+      ),
+      field("title", "Title", TextInputStyle.Short, 256, false, title),
+      field(
+        "content",
+        "Content",
+        TextInputStyle.Paragraph,
+        EMBED_MAX_CONTENT,
+        true,
+        content,
+      ),
+    );
+}
+function embedResultEmbed(row, channel, extra) {
+  const body = [
+    `ID: \`${row.embed_id}\``,
+    `Channel: ${channel ? `<#${row.channel_id}>` : "a deleted channel"}`,
+    `Author: ${row.author_id ? `<@${row.author_id}>` : "unknown"}${
+      row.author_name ? ` (${row.author_name})` : ""
+    }`,
+    `Created: <t:${Math.floor(row.created_at / 1000)}:f> (\`${embedDate(
+      row.created_at,
+    )}\`)`,
+    extra || "",
+    `Use \`/embed edit id:${row.embed_id}\` or \`/embed delete id:${row.embed_id}\`.`,
+  ].filter(Boolean);
+  return embed(`Embed \`${row.embed_id}\``, body.join("\n"));
+}
+function canManageEmbed(interaction, row) {
+  if (isBotOwner(interaction.user?.id, interaction.client)) return true;
+  if (interaction.memberPermissions?.has(PermissionFlagsBits.Administrator))
+    return true;
+  return Boolean(row && row.author_id && row.author_id === interaction.user?.id);
+}
+function embedGate(interaction) {
+  return (
+    interaction.memberPermissions?.has(PermissionFlagsBits.ManageMessages) ||
+    isBotOwner(interaction.user?.id, interaction.client)
+  )
+    ? null
+    : "You need Manage Messages to manage embeds.";
+}
+
+const embedCmd = new SlashCommandBuilder()
+  .setName("embed")
+  .setDescription("Create and manage saved embed messages")
+  .addSubcommand((s) =>
+    s
+      .setName("create")
+      .setDescription("Open the embed form and post the embed")
+      .addChannelOption((o) =>
+        o.setName("channel").setDescription("Where to create the embed (default: this channel)"),
+      ),
+  )
+  .addSubcommand((s) =>
+    s.setName("list").setDescription("List every saved embed in this server"),
+  )
+  .addSubcommand((s) =>
+    s
+      .setName("edit")
+      .setDescription("Edit an embed you created")
+      .addStringOption((o) =>
+        o
+          .setName("id")
+          .setDescription("Embed ID (8 characters)")
+          .setRequired(true)
+          .setAutocomplete(true),
+      ),
+  )
+  .addSubcommand((s) =>
+    s
+      .setName("delete")
+      .setDescription("Delete an embed you created")
+      .addStringOption((o) =>
+        o
+          .setName("id")
+          .setDescription("Embed ID (8 characters)")
+          .setRequired(true)
+          .setAutocomplete(true),
+      ),
+  );
+add(embedCmd, "Utility", "Manage Messages", async (i) => {
+  const gate = embedGate(i);
+  if (gate) return deny(i, gate);
+  const sub = i.options.getSubcommand();
+
+  if (sub === "create") {
+    const channel = i.options.getChannel("channel") || i.channel;
+    const channelError = usableEmbedChannel(channel);
+    if (channelError) return deny(i, channelError);
+    const row = new ActionRowBuilder().addComponents(
+      new ButtonBuilder()
+        .setCustomId(`embed_create|${channel.id}`)
+        .setLabel("Open form")
+        .setStyle(ButtonStyle.Primary),
+    );
+    return respond(i, {
+      content: `Fill in the form to create an embed in ${channel}.`,
+      components: [row],
+      ephemeral: true,
+    });
+  }
+
+  if (sub === "list") {
+    const rows = store.listEmbeds(i.guildId);
+    if (!rows.length)
+      return respond(i, {
+        components: [embed("Saved embeds", "No embeds have been created in this server yet.")],
+        ephemeral: true,
+      });
+    const shown = rows.slice(0, EMBED_LIST_LIMIT);
+    const lines = shown.map((r) => {
+      const label = r.title || r.content || "(empty)";
+      const short =
+        label.length > 60 ? `${label.slice(0, 60)}…` : label;
+      const edited = r.updated_at ? ` · edited <t:${Math.floor(r.updated_at / 1000)}:R>` : "";
+      return `\`${r.embed_id}\` — ${channelMention(i.guild, r.channel_id)} — **${short}**\nby ${
+        r.author_id ? `<@${r.author_id}>` : "unknown"
+      } · <t:${Math.floor(r.created_at / 1000)}:R>${edited}`;
+    });
+    const overflow = rows.length > shown.length
+      ? `\n*Showing ${shown.length} of ${rows.length} — use \`/embed edit\` or \`/embed delete\` with an ID for the rest.*`
+      : "";
+    return respond(i, {
+      components: [embed(`Saved embeds (${rows.length})`, `${lines.join("\n")}${overflow}`)],
+      ephemeral: true,
+    });
+  }
+
+  const id = i.options.getString("id")?.trim();
+  const row = store.getEmbed(i.guildId, id);
+  if (!row)
+    return deny(i, `No embed found with id \`${id}\`. Use \`/embed list\` to see them.`);
+  if (!canManageEmbed(i, row))
+    return deny(i, `Only <@${row.author_id}> (the author) can ${sub} this embed.`);
+
+  if (sub === "delete") {
+    const hook = row.webhook_id
+      ? await i.guild.webhooks.fetch(row.webhook_id).catch(() => null)
+      : null;
+    if (hook && row.message_id)
+      await hook.deleteMessage(row.message_id).catch(() => {});
+    store.deleteEmbed(i.guildId, row.embed_id);
+    return respond(i, {
+      components: [
+        embed(
+          "Embed deleted",
+          `\`${row.embed_id}\` was removed${
+            channelMention(i.guild, row.channel_id) ? ` from ${channelMention(i.guild, row.channel_id)}` : ""
+          }.`,
+        ),
+      ],
+      ephemeral: true,
+    });
+  }
+
+  const editChannel = await resolveEmbedChannel(i.guild, "", row.channel_id);
+  const channelError = usableEmbedChannel(editChannel);
+  if (channelError) return deny(i, `Cannot edit \`${row.embed_id}\`: ${channelError}`);
+  return respond(i, {
+    content: `Editing embed \`${row.embed_id}\`. Leave the channel field blank to keep it in ${channelMention(
+      i.guild,
+      row.channel_id,
+    )}.`,
+    components: [
+      new ActionRowBuilder().addComponents(
+        new ButtonBuilder()
+          .setCustomId(`embed_edit|${row.embed_id}`)
+          .setLabel("Open form")
+          .setStyle(ButtonStyle.Primary),
+      ),
+    ],
+    ephemeral: true,
+  });
+});
+commands.find((c) => c.data.name === "embed").autocomplete = async (i) => {
+  if (i.options.getSubcommand(false) !== "edit" && i.options.getSubcommand(false) !== "delete")
+    return i.respond([]).catch(() => {});
+  const query = String(i.options.getFocused() || "").toLowerCase();
+  const choices = store
+    .listEmbeds(i.guildId)
+    .filter((r) => !query || r.embed_id.toLowerCase().includes(query))
+    .slice(0, 25)
+    .map((r) => ({
+      name: `${r.embed_id} — ${(r.title || r.content || "(empty)").slice(0, 70)}`.slice(0, 100),
+      value: r.embed_id,
+    }));
+  return i.respond(choices).catch(() => {});
+};
+
+async function handleEmbedButton(i) {
+  if (!i.isButton()) return false;
+  const [prefix, arg] = i.customId.split("|");
+  if (prefix !== "embed_create" && prefix !== "embed_edit") return false;
+  const gate = embedGate(i);
+  if (gate) {
+    return i
+      .reply({ content: gate, ephemeral: true, allowedMentions: { parse: [] } })
+      .then(() => true);
+  }
+  if (prefix === "embed_create") {
+    const channel = await resolveEmbedChannel(i.guild, arg, i.channelId);
+    const channelError = usableEmbedChannel(channel);
+    if (channelError)
+      return i
+        .reply({ content: channelError, ephemeral: true, allowedMentions: { parse: [] } })
+        .then(() => true);
+    return i
+      .showModal(
+        embedFormModal({
+          customId: `${EMBED_FORM_CREATE}|${channel.id}`,
+          channelLabel: `#${channel.name}`,
+        }),
+      )
+      .then(() => true);
+  }
+  const row = store.getEmbed(i.guildId, arg);
+  if (!row)
+    return i
+      .reply({
+        content: `That embed no longer exists. Use \`/embed list\` to see the current ones.`,
+        ephemeral: true,
+        allowedMentions: { parse: [] },
+      })
+      .then(() => true);
+  if (!canManageEmbed(i, row))
+    return i
+      .reply({
+        content: `Only <@${row.author_id}> (the author) can edit this embed.`,
+        ephemeral: true,
+        allowedMentions: { parse: [] },
+      })
+      .then(() => true);
+  const channel = await resolveEmbedChannel(i.guild, "", row.channel_id);
+  const channelError = usableEmbedChannel(channel);
+  if (channelError)
+    return i
+      .reply({ content: channelError, ephemeral: true, allowedMentions: { parse: [] } })
+      .then(() => true);
+  return i
+    .showModal(
+      embedFormModal({
+        customId: `${EMBED_FORM_EDIT}|${row.embed_id}`,
+        channelLabel: channel ? `#${channel.name}` : "",
+        title: row.title || "",
+        content: row.content || "",
+      }),
+    )
+    .then(() => true);
+}
+
+async function embedFormReply(i, payload) {
+  const response = { ...normalizeResponse(payload), allowedMentions: { parse: [] } };
+  // The form was opened from a button message, so replacing that message keeps
+  // the whole flow on one ephemeral reply instead of stacking follow-ups.
+  const updated = await i
+    .update({ ...response, components: response.components ?? [] })
+    .catch(() => null);
+  if (updated) return updated;
+  return i
+    .editReply({ ...response, flags: MessageFlags.Ephemeral })
+    .catch(() => null);
+}
+
+async function handleEmbedModal(i) {
+  if (!i.isModalSubmit()) return false;
+  const [kind, arg] = i.customId.split("|");
+  if (kind !== EMBED_FORM_CREATE && kind !== EMBED_FORM_EDIT) return false;
+  await submitEmbedForm(i, kind, arg);
+  return true;
+}
+
+async function submitEmbedForm(i, kind, arg) {
+  const label = kind === EMBED_FORM_EDIT ? "Embed not edited" : "Embed not created";
+  const gate = embedGate(i);
+  if (gate) {
+    await i.deferUpdate().catch(() => {});
+    return embedFormReply(i, { content: gate });
+  }
+
+  const fields = i.fields.getTextInputValue("channel");
+  const title = i.fields.getTextInputValue("title").trim();
+  const content = i.fields.getTextInputValue("content").trim();
+  if (!content) {
+    await i.deferUpdate().catch(() => {});
+    return embedFormReply(i, {
+      components: [embed(label, "The content field was empty.")],
+    });
+  }
+
+  const existing = kind === EMBED_FORM_EDIT ? store.getEmbed(i.guildId, arg) : null;
+  if (kind === EMBED_FORM_EDIT && !existing) {
+    await i.deferUpdate().catch(() => {});
+    return embedFormReply(i, {
+      components: [embed(label, "That embed no longer exists.")],
+    });
+  }
+  if (existing && !canManageEmbed(i, existing)) {
+    await i.deferUpdate().catch(() => {});
+    return embedFormReply(i, {
+      components: [
+        embed(label, `Only <@${existing.author_id}> (the author) can edit this embed.`),
+      ],
+    });
+  }
+
+  const fallbackChannelId = existing ? existing.channel_id : arg;
+  const channel = await resolveEmbedChannel(i.guild, fields, fallbackChannelId);
+  const channelError = usableEmbedChannel(channel);
+  if (channelError) {
+    await i.deferUpdate().catch(() => {});
+    return embedFormReply(i, { components: [embed(label, channelError)] });
+  }
+
+  // An edit keeps the original author's name/avatar and creation date so the
+  // "Sent by …" footer always describes who actually sent the embed.
+  const author = existing
+    ? (await i.client.users.fetch(existing.author_id).catch(() => null)) ||
+      i.client.users.cache.get(existing.author_id) ||
+      i.user
+    : i.user;
+  const createdAt = existing?.created_at || Date.now();
+  const built = buildEmbedMessage(i.guild, { title, content, author, createdAt });
+
+  let hook;
+  try {
+    hook = await ensureEmbedWebhook(i.guild, channel);
+  } catch (e) {
+    await i.deferUpdate().catch(() => {});
+    return embedFormReply(i, {
+      components: [embed(label, `I could not create a webhook in ${channel}: ${e.message}`)],
+    });
+  }
+
+  await i.deferUpdate().catch(() => {});
+
+  if (existing) {
+    const sameChannel = existing.channel_id === channel.id;
+    let edited = false;
+    if (sameChannel && existing.webhook_id === hook.id && existing.message_id) {
+      edited = await hook
+        .editMessage(existing.message_id, { embeds: [built] })
+        .then(() => true)
+        .catch(() => false);
+    }
+    if (edited) {
+      const updated = store.updateEmbed(i.guildId, existing.embed_id, {
+        title: title || null,
+        content,
+      });
+      return embedFormReply(i, {
+        components: [embedResultEmbed(updated, channel)],
+      });
+    }
+    // The message or webhook is gone (or the channel changed), so repost and
+    // clean up whatever is left of the old message.
+    const sent = await hook
+      .send({ embeds: [built], allowedMentions: { parse: [] } })
+      .catch((e) => {
+        console.error("[embed] webhook send failed:", e.message);
+        return null;
+      });
+    if (!sameChannel && existing.message_id && existing.webhook_id) {
+      const oldHook = await i.guild.webhooks.fetch(existing.webhook_id).catch(() => null);
+      await oldHook?.deleteMessage(existing.message_id).catch(() => {});
+    }
+    const updated = store.updateEmbed(i.guildId, existing.embed_id, {
+      channel_id: channel.id,
+      webhook_id: hook.id,
+      message_id: sent?.id || null,
+      title: title || null,
+      content,
+    });
+    return embedFormReply(i, {
+      components: [
+        embedResultEmbed(
+          updated,
+          channel,
+          !sent
+            ? "*The message could not be posted — the saved details were still updated.*"
+            : sameChannel
+              ? "The original message was gone, so a new one was posted."
+              : "The embed moved to the new channel.",
+        ),
+      ],
+    });
+  }
+
+  const sent = await hook
+    .send({ embeds: [built], allowedMentions: { parse: [] } })
+    .catch((e) => {
+      console.error("[embed] webhook send failed:", e.message);
+      return null;
+    });
+  const row = store.createEmbed(i.guildId, {
+    channelId: channel.id,
+    webhookId: hook.id,
+    messageId: sent?.id || null,
+    title: title || null,
+    content,
+    authorId: i.user.id,
+    authorName: embedAuthorName(i.user),
+  });
+  if (!row) {
+    return embedFormReply(i, {
+      components: [
+        embed(
+          "Embed not saved",
+          `The embed was posted to ${channel} but I could not save its ID.`,
+        ),
+      ],
+    });
+  }
+  return embedFormReply(i, {
+    components: [
+      embedResultEmbed(
+        row,
+        channel,
+        sent ? "" : "*The message could not be posted — it was still saved.*",
+      ),
+    ],
+  });
+}
+
 module.exports = {
   commands,
   metadata,
@@ -2162,4 +2711,6 @@ module.exports = {
   DN_BUTTON_TTL_MS,
   DN_LINK_STYLES,
   FARM_TYPES,
+  handleEmbedButton,
+  handleEmbedModal,
 };
