@@ -178,7 +178,7 @@ async function handleDnTypoMessage(message) {
   const farm = store.getFarm(message.guild.id, dn);
   if (!farm) return;
 
-  const { embed: built, row } = await buildDnEmbed(farm, message.guild.id);
+  const { embed: built, row } = await buildDnEmbed(farm, message.guild.id, message.author);
   await message
     .reply({ embeds: [built], components: row ? [row] : [] })
     .catch(() => {});
@@ -237,49 +237,55 @@ async function checkTicketReminders() {
 
 setInterval(checkTicketReminders, TICKET_SWEEP_INTERVAL_MS);
 
+// Answer a button click with a short notice. Ephemeral follow-ups are not
+// accepted everywhere a farm embed can live (the DM channel `/dn` uses by
+// default), so a plain follow-up is the fallback rather than losing the reply.
+function buttonNotice(i, content, useEphemeral = true) {
+  return i
+    .followUp({ content, ephemeral: useEphemeral, allowedMentions: { parse: [] } })
+    .catch(() =>
+      useEphemeral
+        ? buttonNotice(i, content, false)
+        : Promise.resolve(null),
+    );
+}
+
 // Farm link buttons on /dn embeds. The click is handled here rather than being a
 // Link button so the 10-minute expiry can be enforced, and so using a button
 // pushes the expiry back out — the timer only runs out after 10 idle minutes.
+// `/dn` delivers embeds by DM, so the guild id comes from the custom id rather
+// than the interaction, and the link itself is a followUp because `update()` has
+// already acknowledged the interaction by the time we answer.
 client.on(Events.InteractionCreate, async (i) => {
-  if (!i.isButton() || !i.guildId) return;
+  if (!i.isButton()) return;
   const parts = i.customId.split("|");
   if (parts[0] !== "farm_dl") return;
-  const [, dn, kind, expiresRaw] = parts;
+  const [, guildId, dn, kind, expiresRaw] = parts;
   const expiresAt = Number(expiresRaw);
-  const farm = store.getFarm(i.guildId, dn);
-  const url = farm?.[kind];
+  const farm = store.getFarm(guildId, dn);
   const label = kind === "video" ? "video" : kind === "world" ? "world" : "schematic";
 
+  if (!farm) {
+    return buttonNotice(i, `I no longer know about farm \`${dn}\`. Run \`/dn\` again for current farms.`);
+  }
+  const url = farm[kind];
   if (!url) {
-    return i
-      .reply({
-        content: `That farm no longer has a ${label} link. Run \`/dn\` again for the current files.`,
-        ephemeral: true,
-        allowedMentions: { parse: [] },
-      })
-      .catch(() => {});
+    return buttonNotice(i, `That farm no longer has a ${label} link. Run \`/dn\` again for the current files.`);
   }
   if (!Number.isFinite(expiresAt) || Date.now() > expiresAt) {
     // Grey the row out so nobody keeps clicking a dead button.
-    i.update({ components: [dnButtonRow(farm, 0, true)].filter(Boolean) }).catch(() => {});
-    return i
-      .reply({
-        content: `These buttons expired after 10 minutes of inactivity. Run \`/dn ${dn}\` again for fresh links.`,
-        ephemeral: true,
-        allowedMentions: { parse: [] },
-      })
+    await i
+      .update({ components: [dnButtonRow(farm, guildId, 0, true)].filter(Boolean) })
       .catch(() => {});
+    return buttonNotice(
+      i,
+      `These buttons expired after 10 minutes of inactivity. Run \`/dn ${dn}\` again for fresh links.`,
+    );
   }
   await i
-    .update({ components: [dnButtonRow(farm, Date.now() + DN_BUTTON_TTL_MS)].filter(Boolean) })
+    .update({ components: [dnButtonRow(farm, guildId, Date.now() + DN_BUTTON_TTL_MS)].filter(Boolean) })
     .catch(() => {});
-  return i
-    .reply({
-      content: `**${farm.dn} — ${label}**\n${url}`,
-      ephemeral: true,
-      allowedMentions: { parse: [] },
-    })
-    .catch(() => {});
+  return buttonNotice(i, `**${farm.dn} — ${label}**\n${url}`);
 });
 
 client.on(Events.InteractionCreate, async (i) => {
@@ -359,7 +365,7 @@ client.on(Events.InteractionCreate, async (i) => {
   );
   await i
     .update({
-      embeds: [farmListEmbed(state.guildId, farms, next, FARM_LIST_PER_PAGE, state.type)],
+      embeds: [farmListEmbed(state.guildId, farms, next, FARM_LIST_PER_PAGE, state.type, state.footer)],
       components: [row],
     })
     .catch(() => {});

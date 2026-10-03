@@ -1262,7 +1262,7 @@ async function handlePrefixMessage(message) {
     }
     const siteUrl = `https://theysix.ro-mihaiu.xyz/farm/java/${encodeURIComponent(farm.dn)}`;
     try {
-      const { embed: dnEmbed, row } = await buildDnEmbed(farm, message.guild.id);
+      const { embed: dnEmbed, row } = await buildDnEmbed(farm, message.guild.id, message.author);
       await message.author.send({
         embeds: [dnEmbed],
         components: row ? [row] : [],

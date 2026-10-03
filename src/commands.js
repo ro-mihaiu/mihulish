@@ -94,6 +94,12 @@ function target(i, name = "user") {
 function stamp(t) {
   return `<t:${Math.floor(t / 1000)}:f>`;
 }
+// Footer credit for command-triggered embeds, e.g. "Triggered by mihaiu".
+function triggerFooter(user) {
+  if (!user) return null;
+  const name = user.displayName || user.globalName || user.username || user.tag || String(user.id ?? "");
+  return name ? `Triggered by ${name}` : null;
+}
 function staffStatusLine(row) {
   let status = "";
   let details = "";
@@ -1556,19 +1562,21 @@ function newFarmPageToken() {
   return token;
 }
 
-function farmListEmbed(guildId, farms, page, perPage, type) {
+function farmListEmbed(guildId, farms, page, perPage, type, footer = null) {
   const slice = farms.slice(page * perPage, page * perPage + perPage);
   const pages = Math.max(1, Math.ceil(farms.length / perPage));
   const lines = slice.map(
     (f) =>
       `**\`${f.dn}\`** — ${f.type ? `\`${f.type}\`` : "*(no type)*"} — <t:${Math.floor(f.created_at / 1000)}:R>`,
   );
-  return embed(
+  const built = embed(
     type ? `Farms — ${type}` : "Farms",
     lines.join("\n") +
       (farms.length === 0 ? "Nothing here." : "") +
       (pages > 1 ? `\n\nPage ${page + 1} of ${pages} (${farms.length} farms)` : ""),
   );
+  if (footer) built.setFooter({ text: footer });
+  return built;
 }
 
 const farmCmd = new SlashCommandBuilder()
@@ -1695,9 +1703,12 @@ add(farmCmd, "Farms", "Manager", async (i) => {
         .setStyle(ButtonStyle.Secondary)
         .setDisabled(pages <= 1),
     );
-    farmPages.set(pageToken, { guildId: i.guildId, type, page: 0 });
+    farmPages.set(pageToken, { guildId: i.guildId, type, page: 0, footer: triggerFooter(i.user) });
     return respond(i, {
-      components: [farmListEmbed(i.guildId, farms, 0, perPage, type), row],
+      components: [
+        farmListEmbed(i.guildId, farms, 0, perPage, type, triggerFooter(i.user)),
+        row,
+      ],
       ephemeral: true,
     });
   }
@@ -1803,14 +1814,16 @@ function dnLinkStyle(guildId) {
   return DN_LINK_STYLES.includes(stored) ? stored : DN_DEFAULT_STYLE;
 }
 // Buttons are not Link-styled on purpose: the click is handled by the bot so
-// the expiry can be enforced and the timer refreshed on each use.
-function dnButtonRow(farm, expiresAt, disabled = false) {
+// the expiry can be enforced and the timer refreshed on each use. The guild id
+// rides along in the custom id because `/dn` delivers these embeds by DM, where
+// `interaction.guildId` is null and there is no channel guild to fall back on.
+function dnButtonRow(farm, guildId, expiresAt, disabled = false) {
   const row = new ActionRowBuilder();
   for (const { kind, label, style } of DN_FARM_LINKS) {
     if (!farm[kind]) continue;
     row.addComponents(
       new ButtonBuilder()
-        .setCustomId(`farm_dl|${farm.dn}|${kind}|${expiresAt}`)
+        .setCustomId(`farm_dl|${guildId}|${farm.dn}|${kind}|${expiresAt}`)
         .setLabel(label)
         .setStyle(style)
         .setDisabled(disabled),
@@ -1821,7 +1834,7 @@ function dnButtonRow(farm, expiresAt, disabled = false) {
 // Shared embed for /dn (here + DMs), `m.dn` and the DN channel: the title keeps
 // the video name, the thumbnail is attached when there is one, and the links are
 // reachable through coloured buttons.
-async function buildDnEmbed(farm, guildId = null) {
+async function buildDnEmbed(farm, guildId = null, user = null) {
   const style = guildId ? dnLinkStyle(guildId) : DN_DEFAULT_STYLE;
   const siteUrl = `${FARM_SITE}/${encodeURIComponent(farm.dn)}`;
   const linked = style === "site";
@@ -1834,11 +1847,13 @@ async function buildDnEmbed(farm, guildId = null) {
         : "Use the buttons below to get the files.",
     linked ? 0xe91e63 : COLOR,
   );
+  const footer = triggerFooter(user);
+  if (footer) built.setFooter({ text: footer });
   if (linked) built.setURL(siteUrl);
   const thumbnail = await resolveThumbnail(farm.video);
   if (thumbnail) built.setImage(thumbnail);
   if (linked) return { embed: built, row: null };
-  const row = dnButtonRow(farm, Date.now() + DN_BUTTON_TTL_MS);
+  const row = dnButtonRow(farm, guildId, Date.now() + DN_BUTTON_TTL_MS);
   return { embed: built, row };
 }
 function dnMissMessage(guildId, rawDn) {
@@ -1872,7 +1887,7 @@ add(dnCmd, "Farms", "Everyone", async (i) => {
   }
 
   const siteUrl = `${FARM_SITE}/${encodeURIComponent(farm.dn)}`;
-  const { embed: dnEmbed, row } = await buildDnEmbed(farm, i.guildId);
+  const { embed: dnEmbed, row } = await buildDnEmbed(farm, i.guildId, i.user);
   const payload = { components: row ? [dnEmbed, row] : [dnEmbed] };
 
   if (send === "here") {
