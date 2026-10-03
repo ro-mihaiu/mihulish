@@ -40,6 +40,21 @@ const client = new Client({
 const rest = new REST({ version: "10" }).setToken(
   process.env.DISCORD_TOKEN || "",
 );
+// There is no bulk delete on the global command route (it answers 405); the
+// documented way to empty it is to overwrite it with an empty list.
+async function clearGlobalCommands(applicationId) {
+  try {
+    const stale = await rest.get(Routes.applicationCommands(applicationId));
+    if (!stale.length) return;
+    await rest.put(Routes.applicationCommands(applicationId), { body: [] });
+    logger.log(
+      `[commands] cleared ${stale.length} leftover global command(s) so they do not duplicate the guild ones`,
+    );
+  } catch (e) {
+    // Never let cleanup look like a registration failure.
+    logger.error("[commands] could not clear leftover global commands", e);
+  }
+}
 async function register(applicationId) {
   const body = commands.map((c) => c.data.toJSON());
   const guildId = process.env.DISCORD_GUILD_ID;
@@ -53,17 +68,9 @@ async function register(applicationId) {
       Routes.applicationGuildCommands(applicationId, guildId),
       { body },
     );
-    // A global set registered before this guild was configured still exists
-    // and Discord keeps both, so every command shows up twice. Clear it.
-    const global = await rest
-      .get(Routes.applicationCommands(applicationId))
-      .catch(() => []);
-    if (global.length) {
-      await rest.delete(Routes.applicationCommands(applicationId));
-      logger.log(
-        `[commands] removed ${global.length} leftover global command(s) so they do not duplicate the guild ones`,
-      );
-    }
+    // A global set registered before this guild was configured is still there,
+    // and Discord keeps both, so every command shows up twice.
+    await clearGlobalCommands(applicationId);
   } else await rest.put(Routes.applicationCommands(applicationId), { body });
   logger.log(
     `[commands] registered ${body.length} commands for ${applicationId} (${scope})`,
