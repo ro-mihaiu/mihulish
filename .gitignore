@@ -3,3 +3,5 @@ data/*.db
 data/*.db-*
 node_modules/
 discord-dev.md
+.vscode/
+.vscode/**
