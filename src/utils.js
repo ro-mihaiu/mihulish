@@ -152,4 +152,37 @@ function getYouTubeThumbnail(url) {
   return `https://img.youtube.com/vi/${videoId}/maxresdefault.jpg`;
 }
 
-module.exports = { makeEmbed, logCommand, logEvent, logModeration, sendDM, fetchVideoTitle, extractYouTubeId, getYouTubeThumbnail };
+// maxresdefault 404s on older/low-resolution uploads, which renders as a broken
+// embed image. Probe once per video, remember the working size, and fall back to
+// hqdefault (always present) so /dn embeds never show a dead image.
+const thumbnailCache = new Map();
+async function resolveThumbnail(url) {
+  const videoId = extractYouTubeId(url);
+  if (!videoId) return null;
+  const cached = thumbnailCache.get(videoId);
+  if (cached !== undefined) return cached;
+  const candidates = [
+    `https://img.youtube.com/vi/${videoId}/maxresdefault.jpg`,
+    `https://img.youtube.com/vi/${videoId}/hqdefault.jpg`,
+  ];
+  let resolved = null;
+  for (const candidate of candidates) {
+    try {
+      const res = await fetch(candidate, {
+        method: "HEAD",
+        signal: AbortSignal.timeout(4000),
+      });
+      if (res.ok) {
+        resolved = candidate;
+        break;
+      }
+    } catch {
+      // network hiccup: stop probing and use whatever we have
+      break;
+    }
+  }
+  thumbnailCache.set(videoId, resolved);
+  return resolved;
+}
+
+module.exports = { makeEmbed, logCommand, logEvent, logModeration, sendDM, fetchVideoTitle, extractYouTubeId, getYouTubeThumbnail, resolveThumbnail };

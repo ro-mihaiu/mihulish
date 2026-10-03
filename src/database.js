@@ -58,8 +58,6 @@ CREATE TABLE IF NOT EXISTS tickets (id INTEGER PRIMARY KEY AUTOINCREMENT, guild_
 CREATE TABLE IF NOT EXISTS sticky_messages (id INTEGER PRIMARY KEY AUTOINCREMENT, guild_id TEXT NOT NULL, channel_id TEXT NOT NULL, message_id TEXT, content TEXT NOT NULL, updated_at INTEGER NOT NULL, UNIQUE(guild_id,channel_id));
 CREATE TABLE IF NOT EXISTS moderation_logs (id INTEGER PRIMARY KEY AUTOINCREMENT, guild_id TEXT NOT NULL, action TEXT NOT NULL, target_id TEXT, moderator_id TEXT, reason TEXT, created_at INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS original_nicknames (guild_id TEXT NOT NULL, user_id TEXT NOT NULL, nickname TEXT, PRIMARY KEY (guild_id, user_id));
-CREATE TABLE IF NOT EXISTS votes (guild_id TEXT PRIMARY KEY REFERENCES guilds(guild_id) ON DELETE CASCADE, streak INTEGER NOT NULL DEFAULT 0, last_vote_at INTEGER, last_voter_id TEXT);
-CREATE TABLE IF NOT EXISTS user_votes (guild_id TEXT NOT NULL, user_id TEXT NOT NULL, last_vote_at INTEGER NOT NULL, PRIMARY KEY (guild_id, user_id));
 CREATE TABLE IF NOT EXISTS farm_channel_config (guild_id TEXT PRIMARY KEY REFERENCES guilds(guild_id) ON DELETE CASCADE, video_channel_id TEXT, world_channel_id TEXT, schematic_channel_id TEXT);
 CREATE TABLE IF NOT EXISTS farms (guild_id TEXT NOT NULL, dn TEXT NOT NULL, type TEXT, video TEXT, video_title TEXT, world TEXT, schematic TEXT, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, updated_by TEXT, PRIMARY KEY (guild_id, dn));
 CREATE INDEX IF NOT EXISTS farms_type ON farms(guild_id, type, created_at);
@@ -121,6 +119,11 @@ try {
     "UPDATE farms SET created_at = updated_at WHERE created_at IS NULL",
   );
 } catch {}
+
+// Voting was removed: drop the tables so existing databases stop carrying the
+// data. Idempotent, and never referenced by any command any more.
+db.exec("DROP TABLE IF EXISTS user_votes");
+db.exec("DROP TABLE IF EXISTS votes");
 
 const DEFAULT_TICKET_PANELS = ["java", "br", "bug", "report", "partnership"];
 
@@ -370,6 +373,14 @@ function assignTicket(g, c, u) {
 function updateTicketLastMessage(g, c) {
   db.prepare("UPDATE tickets SET last_message_at=? WHERE guild_id=? AND channel_id=?").run(Date.now(), g, c);
 }
+function listOpenTickets(g) {
+  ensureGuild(g);
+  return db
+    .prepare(
+      "SELECT * FROM tickets WHERE guild_id=? AND status='OPEN' AND ticket_user_id IS NOT NULL",
+    )
+    .all(g);
+}
 function deleteTicket(g, c) {
   db.prepare("DELETE FROM tickets WHERE guild_id=? AND channel_id=?").run(g, c);
 }
@@ -429,47 +440,6 @@ function getModerationLogs(guildId, targetId = null) {
     a.push(targetId);
   }
   return db.prepare(q + " ORDER BY created_at DESC").all(...a);
-}
-function vote(guildId, userId) {
-  ensureGuild(guildId);
-  const row = db
-    .prepare("SELECT * FROM votes WHERE guild_id=?")
-    .get(guildId);
-  const now = Date.now();
-  const STREAK_RESET_MS = 48 * 60 * 60 * 1000;
-  const USER_COOLDOWN_MS = 12 * 60 * 60 * 1000;
-  const userRow = db
-    .prepare("SELECT * FROM user_votes WHERE guild_id=? AND user_id=?")
-    .get(guildId, userId);
-  if (userRow && now - userRow.last_vote_at < USER_COOLDOWN_MS) {
-    const remaining = Math.ceil((USER_COOLDOWN_MS - (now - userRow.last_vote_at)) / 60000);
-    return { ok: false, remainingMinutes: remaining, streak: row?.streak || 0, lastVoterId: row?.last_voter_id || null };
-  }
-  let streak = 0;
-  if (row && row.last_vote_at && now - row.last_vote_at < STREAK_RESET_MS) {
-    streak = row.streak + 1;
-  } else {
-    streak = 1;
-  }
-  db.prepare(
-    "INSERT INTO votes(guild_id,streak,last_vote_at,last_voter_id) VALUES(?,?,?,?) ON CONFLICT(guild_id) DO UPDATE SET streak=excluded.streak,last_vote_at=excluded.last_vote_at,last_voter_id=excluded.last_voter_id",
-  ).run(guildId, streak, now, userId);
-  db.prepare(
-    "INSERT INTO user_votes(guild_id,user_id,last_vote_at) VALUES(?,?,?) ON CONFLICT(guild_id,user_id) DO UPDATE SET last_vote_at=excluded.last_vote_at",
-  ).run(guildId, userId, now);
-  const updated = db
-    .prepare("SELECT * FROM votes WHERE guild_id=?")
-    .get(guildId);
-  const prevVoter = row?.last_voter_id || null;
-  const isNewStreak = streak === 1 && (!row || !row.last_vote_at || now - row.last_vote_at >= STREAK_RESET_MS);
-  return { ok: true, streak: updated.streak, lastVoterId: updated.last_voter_id, prevVoterId: prevVoter, isNewStreak };
-}
-function getVotes(guildId) {
-  const row = db
-    .prepare("SELECT * FROM votes WHERE guild_id=?")
-    .get(guildId);
-  if (!row) return { streak: 0, lastVoterId: null, lastVoteAt: null };
-  return { streak: row.streak, lastVoterId: row.last_voter_id, lastVoteAt: row.last_vote_at };
 }
 function randomStickyId() {
   const chars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
@@ -572,15 +542,30 @@ function farmByChannel(guildId, channelId) {
   if (c.video_channel_id === channelId) return "video";
   return null;
 }
+// DNs are alphanumeric (e.g. `467`, `B105`, `C21`) and users type them with
+// stray case, spaces or punctuation (`b 105`, `#B105`, `dn:B105`). Collapse
+// any input to the canonical uppercase alphanumeric form before lookup.
+function normalizeDn(value) {
+  if (value === null || value === undefined) return null;
+  const cleaned = String(value).toUpperCase().replace(/[^A-Z0-9]/g, "");
+  return cleaned || null;
+}
+// LIKE patterns treat % and _ as wildcards; escape them for literal matching.
+function escapeLike(value) {
+  return String(value).replace(/[\\%_]/g, (c) => `\\${c}`);
+}
 function getFarm(guildId, dn) {
+  const key = normalizeDn(dn);
+  if (!key) return null;
   return db
-    .prepare("SELECT * FROM farms WHERE guild_id=? AND dn=?")
-    .get(guildId, dn);
+    .prepare("SELECT * FROM farms WHERE guild_id=? AND dn=? COLLATE NOCASE")
+    .get(guildId, key);
 }
 function upsertFarm(guildId, dn, fields, updatedBy) {
   if (!isAllowedGuild(guildId)) return { farm: null, changed: {}, isNew: false };
   ensureGuild(guildId);
-  const current = getFarm(guildId, dn);
+  const key = normalizeDn(dn) || dn;
+  const current = getFarm(guildId, key);
   const now = Date.now();
   const merged = {
     type: fields.type ?? current?.type ?? null,
@@ -594,17 +579,20 @@ function upsertFarm(guildId, dn, fields, updatedBy) {
   db.prepare(
     "INSERT INTO farms(guild_id,dn,type,video,video_title,world,schematic,created_at,updated_at,updated_by) VALUES(?,?,?,?,?,?,?,?,?,?) " +
       "ON CONFLICT(guild_id,dn) DO UPDATE SET type=excluded.type,video=excluded.video,video_title=excluded.video_title,world=excluded.world,schematic=excluded.schematic,created_at=excluded.created_at,updated_at=excluded.updated_at,updated_by=excluded.updated_by",
-  ).run(guildId, dn, merged.type, merged.video, merged.video_title, merged.world, merged.schematic, createdAt, now, updatedBy || null);
+  ).run(guildId, key, merged.type, merged.video, merged.video_title, merged.world, merged.schematic, createdAt, now, updatedBy || null);
   const changed = {};
-  for (const key of ["type", "video", "video_title", "world", "schematic"]) {
-    if (fields[key] !== undefined && fields[key] !== current?.[key]) changed[key] = fields[key];
+  for (const key2 of ["type", "video", "video_title", "world", "schematic"]) {
+    if (fields[key2] !== undefined && fields[key2] !== current?.[key2]) changed[key2] = fields[key2];
   }
-  return { farm: getFarm(guildId, dn), changed, isNew: !current };
+  return { farm: getFarm(guildId, key), changed, isNew: !current };
 }
 function deleteFarm(guildId, dn) {
+  const key = normalizeDn(dn);
+  if (!key) return false;
   return (
-    db.prepare("DELETE FROM farms WHERE guild_id=? AND dn=?").run(guildId, dn)
-      .changes > 0
+    db
+      .prepare("DELETE FROM farms WHERE guild_id=? AND dn=? COLLATE NOCASE")
+      .run(guildId, key).changes > 0
   );
 }
 function listFarms(guildId, type = null) {
@@ -615,6 +603,72 @@ function listFarms(guildId, type = null) {
   return db
     .prepare("SELECT * FROM farms WHERE guild_id=? ORDER BY created_at DESC")
     .all(guildId);
+}
+// Prefix/substring search over DNs, powering `/dn` autocomplete and the
+// "did you mean" hints when a lookup misses. Prefix hits are ranked first.
+function searchFarms(guildId, query, limit = 25) {
+  const key = normalizeDn(query);
+  if (!key)
+    return db
+      .prepare(
+        "SELECT dn, type, video_title FROM farms WHERE guild_id=? ORDER BY dn COLLATE NOCASE LIMIT ?",
+      )
+      .all(guildId, limit);
+  const like = `%${escapeLike(key)}%`;
+  const prefix = `${escapeLike(key)}%`;
+  return db
+    .prepare(
+      "SELECT dn, type, video_title FROM farms WHERE guild_id=? AND dn LIKE ? ESCAPE '\\' " +
+        "ORDER BY CASE WHEN dn LIKE ? ESCAPE '\\' THEN 0 ELSE 1 END, dn COLLATE NOCASE LIMIT ?",
+    )
+    .all(guildId, like, prefix, limit);
+}
+// Close matches for a failed lookup: DNs containing the query, the digit-only
+// reading of it (`B105` still finds `105`), then numeric neighbours so a gap in
+// the sequence (`B105`) points at the DNs around it.
+function suggestFarms(guildId, dn, limit = 5) {
+  const key = normalizeDn(dn);
+  if (!key) return [];
+  const rows = [];
+  const seen = new Set();
+  const push = (row) => {
+    if (row && !seen.has(row.dn)) {
+      seen.add(row.dn);
+      rows.push(row);
+    }
+  };
+  const byLike = db.prepare(
+    "SELECT dn, video_title FROM farms WHERE guild_id=? AND dn LIKE ? ESCAPE '\\' ORDER BY dn COLLATE NOCASE LIMIT ?",
+  );
+  // 1. DNs containing the query as typed.
+  for (const row of byLike.all(guildId, `%${escapeLike(key)}%`, limit * 2)) push(row);
+  // 2. Numeric neighbours fill a gap in the sequence (`B105` -> B104/B106).
+  if (rows.length < limit) {
+    const shaped = key.match(/^([A-Z]*)(\d+)([A-Z]*)$/);
+    if (shaped) {
+      const [, prefix, rawDigits, suffix] = shaped;
+      const width = rawDigits.length;
+      const byDn = db.prepare(
+        "SELECT dn, video_title FROM farms WHERE guild_id=? AND dn=? COLLATE NOCASE",
+      );
+      const centre = Number(rawDigits);
+      for (const delta of [1, -1, 2, -2, 3, -3]) {
+        const next = centre + delta;
+        if (next < 0) continue;
+        push(byDn.get(guildId, prefix + String(next).padStart(width, "0") + suffix));
+      }
+    }
+  }
+  // 3. Lookalike characters (`B1O5` -> B105) and the bare digits (`105`).
+  if (rows.length < limit) {
+    const folded = key.replace(/[O]/g, "0").replace(/[IL]/g, "1").replace(/[S]/g, "5");
+    if (folded !== key)
+      for (const row of byLike.all(guildId, `%${escapeLike(folded)}%`, limit)) push(row);
+    const digits = key.replace(/[^0-9]/g, "");
+    if (digits && digits !== key)
+      for (const row of byLike.all(guildId, `%${escapeLike(digits)}%`, limit)) push(row);
+  }
+  return rows.slice(0, limit);
 }
 function setDnCooldown(userId, timestamp = Date.now()) {
   db.prepare(
@@ -826,15 +880,17 @@ module.exports = {
   deleteOriginalNickname,
   addModerationLog,
   getModerationLogs,
-  vote,
-  getVotes,
   updateTicketLastMessage,
+  listOpenTickets,
   getAppealLink: (g) => settings(g).appeal_link || null,
   getFarmChannelConfig,
   setFarmChannelConfig,
   farmByChannel,
   getFarm,
   getFarmByDn,
+  searchFarms,
+  suggestFarms,
+  normalizeDn,
   upsertFarm,
   deleteFarm,
   listFarms,

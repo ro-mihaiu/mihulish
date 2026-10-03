@@ -12,10 +12,9 @@ const {
   ButtonBuilder,
   ButtonStyle,
 } = require("discord.js");
-const { commands, store, farmPages, farmListEmbed } = require("./commands");
+const { commands, store, farmPages, farmListEmbed, buildDnEmbed, pingStaleTickets } = require("./commands");
 const { handlePrefixMessage } = require("./prefix");
 const { logCommand, logEvent, sendDM } = require("./commands");
-const { getYouTubeThumbnail } = require("./utils");
 const logger = require("./logger");
 
 // One-shot importers are optional: if the import scripts/files were removed
@@ -161,7 +160,10 @@ async function maintainSticky(message) {
 }
 client.on(Events.MessageCreate, maintainSticky);
 
-const DN_TYPO_REGEX = /(?:\/dn|dn|DN|:dn|:DN|\?dn|\?DN)\s*[:]?\s*(\d+)/i;
+// DNs are alphanumeric (`467`, `B105`, `C21`), and people type them with
+// prefixes, stray punctuation and lowercase (`dn:B105`, `?dn b105`, `/dn B 105`).
+// Capture the DN token after any of those markers and let the store normalize it.
+const DN_TYPO_REGEX = /(?<![\p{L}\p{N}])[^\p{L}\p{N}]*dn(?![\p{L}\p{N}])[^\p{L}\p{N}]{0,3}([a-z]{0,3}[^a-z0-9]{0,2}\d+[a-z0-9]*)/iu;
 const DN_CHANNEL_ID = "1107506735897395332";
 
 async function handleDnTypoMessage(message) {
@@ -171,24 +173,13 @@ async function handleDnTypoMessage(message) {
   const match = message.content.match(DN_TYPO_REGEX);
   if (!match) return;
 
-  const dn = match[1];
-  const farm = require("./database").getFarm(message.guild.id, dn);
+  const dn = store.normalizeDn(match[1]);
+  if (!dn) return;
+  const farm = store.getFarm(message.guild.id, dn);
   if (!farm) return;
 
-  const siteUrl = `https://theysix.ro-mihaiu.xyz/farm/java/${encodeURIComponent(dn)}`;
-  const thumbnailUrl = getYouTubeThumbnail(farm.video);
-
-  const embed = new (require("discord.js").EmbedBuilder)()
-    .setColor(0xe91e63)
-    .setTitle(farm.video_title || `Farm ${dn}`)
-    .setDescription(farm.type ? `Farm type: ${farm.type}` : "All farm links are on the page below.")
-    .setURL(siteUrl);
-
-  if (thumbnailUrl) {
-    embed.setImage(thumbnailUrl);
-  }
-
-  await message.reply({ embeds: [embed] }).catch(() => {});
+  const built = await buildDnEmbed(farm);
+  await message.reply({ embeds: [built] }).catch(() => {});
 }
 
 client.on(Events.MessageCreate, (message) => {
@@ -200,7 +191,7 @@ client.on(Events.MessageCreate, (message) => {
 async function handleCustomCommand(message) {
   if (!message.guild || message.author.bot) return;
   const trigger = message.content.trim().toLowerCase();
-  const cmd = require("./database").getCustomCommand(message.guild.id, trigger);
+  const cmd = store.getCustomCommand(message.guild.id, trigger);
   if (!cmd) return;
   await message.reply(cmd.content).catch(() => {});
 }
@@ -228,44 +219,21 @@ client.on(Events.MessageCreate, async (message) => {
   }
 });
 
+// Automatic sweep: ping tickets with no staff reply for 24h. `/ticket ping:<h>`
+// uses the same helper with a caller-chosen window.
+const TICKET_SWEEP_INTERVAL_MS = 5 * 60 * 1000;
+const TICKET_SWEEP_IDLE_HOURS = 24;
 async function checkTicketReminders() {
   for (const guild of client.guilds.cache.values()) {
-    const rows = store.db
-      .prepare("SELECT * FROM tickets WHERE guild_id=? AND status='OPEN' AND ticket_user_id IS NOT NULL")
-      .all(guild.id);
-    const now = Date.now();
-    for (const t of rows) {
-      const lastMsg = t.last_message_at || t.created_at;
-      if (now - lastMsg < 24 * 60 * 60 * 1000) continue;
-      const channel = guild.channels.cache.get(t.channel_id);
-      if (!channel || !channel.isTextBased()) continue;
-      const messages = await channel.messages.fetch({ limit: 10 }).catch(() => null);
-      if (!messages) continue;
-      const sorted = messages.sort((a, b) => b.createdTimestamp - a.createdTimestamp);
-      const lastStaff = sorted.find((m) => !m.author.bot && store.isStaff(guild.id, m.author.id));
-      const lastAuthor = sorted[0]?.author;
-      const pingTargets = [];
-      if (t.ticket_user_id) pingTargets.push(t.ticket_user_id);
-      if (lastStaff && store.isStaff(guild.id, lastStaff.author.id) && lastStaff.author.id !== t.ticket_user_id) {
-        pingTargets.push(lastStaff.author.id);
-      }
-      if (!pingTargets.length) continue;
-      const uniquePings = [...new Set(pingTargets)];
-      const pingContent = uniquePings.map((id) => `<@${id}>`).join(" ");
-      try {
-        await channel.send({
-          content: `${pingContent} — This ticket has been inactive for 24 hours.`,
-          allowedMentions: { users: uniquePings },
-        });
-        store.db.prepare("UPDATE tickets SET last_message_at=? WHERE guild_id=? AND channel_id=?").run(now, guild.id, t.channel_id);
-      } catch {
-        // ignore send errors
-      }
+    try {
+      await pingStaleTickets(guild, TICKET_SWEEP_IDLE_HOURS);
+    } catch (e) {
+      console.error("[ticket-reminders]", e.message);
     }
   }
 }
 
-setInterval(checkTicketReminders, 5 * 60 * 1000);
+setInterval(checkTicketReminders, TICKET_SWEEP_INTERVAL_MS);
 
 client.on(Events.InteractionCreate, async (i) => {
   if (!i.isChatInputCommand() || !i.guildId) return;

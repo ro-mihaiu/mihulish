@@ -10,7 +10,7 @@ const fs = require("fs");
 const path = require("path");
 const { AttachmentBuilder } = require("discord.js");
 const store = require("./database");
-const { makeEmbed, logCommand, logEvent, logModeration, sendDM, fetchVideoTitle } = require("./utils");
+const { makeEmbed, logCommand, logEvent, logModeration, sendDM, fetchVideoTitle, resolveThumbnail } = require("./utils");
 const COLOR = 0xe91e63;
 const DOCS = "https://mihulish.ro-mihaiu.xyz";
 const metadata = [];
@@ -237,6 +237,7 @@ function buildHelpEmbed(prefix = "m.") {
         { name: "claim", desc: "Claim the current support ticket" },
         { name: "transfer", desc: "Transfer ticket to another staff member" },
         { name: "unclaim", desc: "Release claim on the current ticket" },
+        { name: "ticket", desc: "Ping ticket owners whose tickets have no staff reply" },
       ],
     },
     {
@@ -249,8 +250,6 @@ function buildHelpEmbed(prefix = "m.") {
         { name: "link", desc: "Set an appeal link" },
         { name: "sticky", desc: "Manage a sticky message in a channel" },
         { name: "invite", desc: "Get the bot invite link" },
-        { name: "vote", desc: "Vote for this server and grow the streak" },
-        { name: "votes", desc: "View the server vote streak" },
       ],
     },
   ];
@@ -318,47 +317,6 @@ add(invite, "Utility", "Everyone", async (i) => {
     components: [
       embed("Invite Mihulish", "Click the link below to invite me to your server.\nhttps://invite.ro-mihaiu.xyz"),
     ],
-  });
-});
-const vote = new SlashCommandBuilder()
-  .setName("vote")
-  .setDescription("Vote for this server");
-add(vote, "Utility", "Everyone", async (i) => {
-  const result = store.vote(i.guildId, i.user.id);
-  if (!result.ok) {
-    return respond(i, {
-      components: [
-        embed("Vote cooldown", `You can vote again in **${result.remainingMinutes}** minute(s).\nCurrent streak: **${result.streak}** 🔥`),
-      ],
-      ephemeral: true,
-    });
-  }
-  const desc = [];
-  desc.push(`**Your vote** has been recorded!`);
-  desc.push(`**Server streak:** **${result.streak}** 🔥`);
-  if (result.isNewStreak) desc.push("*(streak reset — votes had expired)*");
-  if (result.prevVoterId && result.prevVoterId !== i.user.id) {
-    desc.push(`Last vote by <@${result.prevVoterId}>`);
-  }
-  return respond(i, {
-    components: [embed("Vote recorded", desc.join("\n"))],
-  });
-});
-const votes = new SlashCommandBuilder()
-  .setName("votes")
-  .setDescription("View the server vote streak");
-add(votes, "Utility", "Everyone", async (i) => {
-  const v = store.getVotes(i.guildId);
-  const desc = [];
-  desc.push(`**Current streak:** **${v.streak}** 🔥`);
-  if (v.lastVoterId) {
-    desc.push(`Last vote by <@${v.lastVoterId}>`);
-    desc.push(`<t:${Math.floor(v.lastVoteAt / 1000)}:R>`);
-  } else {
-    desc.push("No votes yet — use `/vote` to start the streak!");
-  }
-  return respond(i, {
-    components: [embed("Server vote streak", desc.join("\n"))],
   });
 });
 const loa = new SlashCommandBuilder()
@@ -1204,6 +1162,121 @@ add(unclaim, "Tickets", "Staff", async (i) => {
   });
 });
 
+// ---------------- Ticket inactivity pings ----------------
+function formatIdle(ms) {
+  const minutes = Math.floor(ms / 60000);
+  if (minutes < 60) return `${Math.max(1, minutes)}m`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 48) return `${hours}h`;
+  return `${Math.floor(hours / 24)}d`;
+}
+// Find open tickets whose newest *staff* message (falling back to the newest
+// activity) is older than `hours`, then ping the ticket owner plus the staff
+// member who last replied. Shared by `/ticket ping:<hours>` and the nightly
+// sweep in index.js so both agree on what counts as stale.
+async function pingStaleTickets(guild, hours, { limit = 25, markActive = true } = {}) {
+  const cutoff = Date.now() - hours * 3600 * 1000;
+  const stale = [];
+  const skipped = [];
+  for (const t of store.listOpenTickets(guild.id)) {
+    const channel = guild.channels.cache.get(t.channel_id);
+    if (!channel?.isTextBased()) {
+      skipped.push({ ticket: t, reason: "channel not cached" });
+      continue;
+    }
+    const fetched = await channel.messages.fetch({ limit: 25 }).catch(() => null);
+    const recent = fetched
+      ? [...fetched.values()].sort((a, b) => a.createdTimestamp - b.createdTimestamp)
+      : [];
+    const lastStaffMsg = recent.filter(
+      (m) => !m.author.bot && store.isStaff(guild.id, m.author.id),
+    ).pop();
+    const lastActivity = lastStaffMsg?.createdTimestamp || t.last_message_at || t.created_at;
+    if (lastActivity >= cutoff) continue;
+
+    const targetIds = [];
+    if (t.ticket_user_id) targetIds.push(t.ticket_user_id);
+    if (lastStaffMsg && !targetIds.includes(lastStaffMsg.author.id))
+      targetIds.push(lastStaffMsg.author.id);
+    if (t.assigned_staff_id && !targetIds.includes(t.assigned_staff_id))
+      targetIds.push(t.assigned_staff_id);
+    if (!targetIds.length) {
+      skipped.push({ ticket: t, reason: "no one to ping" });
+      continue;
+    }
+    stale.push({
+      ticket: t,
+      channel,
+      targetIds,
+      lastStaffId: lastStaffMsg?.author.id || null,
+      idleMs: Date.now() - lastActivity,
+    });
+  }
+
+  let sent = 0;
+  for (const entry of stale.slice(0, limit)) {
+    const mentions = entry.targetIds.map((id) => `<@${id}>`).join(" ");
+    try {
+      await entry.channel.send({
+        content: `${mentions} — no staff reply for **${formatIdle(entry.idleMs)}** in this ticket. Please check in.`,
+        allowedMentions: { users: entry.targetIds },
+      });
+      sent++;
+      // Record the ping as activity so the periodic sweep doesn't ping again
+      // straight away.
+      if (markActive) store.updateTicketLastMessage(guild.id, entry.channel.id);
+    } catch {
+      skipped.push({ ticket: entry.ticket, reason: "could not send" });
+    }
+  }
+  return { stale, sent, skipped, limit };
+}
+
+const ticketCmd = new SlashCommandBuilder()
+  .setName("ticket")
+  .setDescription("Ticket utilities")
+  .addIntegerOption((o) =>
+    o
+      .setName("ping")
+      .setDescription("Ping tickets with no staff reply for this many hours")
+      .setRequired(true)
+      .setMinValue(1)
+      .setMaxValue(720),
+  );
+add(ticketCmd, "Tickets", "Staff", async (i) => {
+  if (!staff(i)) return deny(i);
+  const hours = i.options.getInteger("ping");
+  const { stale, sent, skipped } = await pingStaleTickets(i.guild, hours);
+  if (!stale.length)
+    return respond(i, {
+      components: [
+        embed(
+          "No stale tickets",
+          `Every open ticket has had a staff reply in the last **${hours}h**.`,
+        ),
+      ],
+      ephemeral: true,
+    });
+  const lines = stale.map((entry) => {
+    const who = entry.lastStaffId ? `last staff <@${entry.lastStaffId}>` : "no staff reply yet";
+    return `<#${entry.channel.id}> — idle **${formatIdle(entry.idleMs)}** · ${who}`;
+  });
+  const notes = [];
+  if (sent < stale.length) notes.push(`${stale.length - sent} could not be pinged.`);
+  if (skipped.length) notes.push(`${skipped.length} ticket(s) skipped.`);
+  return respond(i, {
+    components: [
+      embed(
+        `Pinged ${sent} ticket(s)`,
+        `Stale for more than **${hours}h**:\n${lines.join("\n")}${
+          notes.length ? `\n\n*${notes.join(" ")}*` : ""
+        }`,
+      ),
+    ],
+    ephemeral: true,
+  });
+});
+
 const sticky = new SlashCommandBuilder()
   .setName("sticky")
   .setDescription("Manage sticky messages")
@@ -1687,20 +1760,58 @@ const dnCmd = new SlashCommandBuilder()
   .setName("dn")
   .setDescription("Look up a farm and get its link")
   .addStringOption((o) =>
-    o.setName("dn").setDescription("Farm identifier, for example ABC123").setRequired(true),
+    o
+      .setName("dn")
+      .setDescription("Farm identifier, for example 467 or B105")
+      .setRequired(true)
+      .setAutocomplete(true),
   )
   .addStringOption((o) =>
     o.setName("send")
       .setDescription("Where to send the farm link (default: DMs)")
       .addChoices({ name: "here", value: "here" }, { name: "dms", value: "dms" }),
   );
+// Autocomplete every farm DN in the guild so members can find `B105`-style
+// identifiers instead of guessing them.
+async function dnAutocomplete(i) {
+  const query = String(i.options.getFocused() || "");
+  const choices = store.searchFarms(i.guildId, query, 25).map((f) => ({
+    name: `${f.dn}${f.video_title ? ` — ${f.video_title}` : ""}`.slice(0, 100),
+    value: f.dn,
+  }));
+  return i.respond(choices);
+}
+// Shared embed for /dn (here + DMs) and `m.dn`: the title links to the farm
+// page and carries the YouTube thumbnail whenever the video has one.
+async function buildDnEmbed(farm) {
+  const siteUrl = `${FARM_SITE}/${encodeURIComponent(farm.dn)}`;
+  const built = embed(
+    farm.video_title || `Farm ${farm.dn}`,
+    farm.type ? `Farm type: ${farm.type}` : "All farm links are on the page below.",
+  ).setURL(siteUrl);
+  const thumbnail = await resolveThumbnail(farm.video);
+  if (thumbnail) built.setImage(thumbnail);
+  return built;
+}
+function dnMissMessage(guildId, rawDn) {
+  const close = store.suggestFarms(guildId, rawDn, 5);
+  const hints = close.length
+    ? `\nDid you mean: ${close.map((f) => `\`${f.dn}\``).join(", ")}?`
+    : "";
+  return `No farm found for DN \`${store.normalizeDn(rawDn) || rawDn}\`.${hints} Start typing in \`/dn\` to browse every DN.`;
+}
 add(dnCmd, "Farms", "Everyone", async (i) => {
-  const dn = i.options.getString("dn").trim();
+  const dn = store.normalizeDn(i.options.getString("dn"));
   const send = i.options.getString("send") || "dms";
+  if (!dn)
+    return respond(i, {
+      content: "That doesn't look like a DN. DNs are alphanumeric, for example `467` or `B105`.",
+      ephemeral: true,
+    });
   const farm = store.getFarm(i.guildId, dn);
   if (!farm)
     // Not found: no cooldown consumed — typos shouldn't burn the 2-minute wait.
-    return respond(i, { content: `No farm found for DN \`${dn}\`.`, ephemeral: true });
+    return respond(i, { content: dnMissMessage(i.guildId, dn), ephemeral: true });
 
   const last = store.getDnCooldown(i.user.id);
   const bypass = i.member?.roles?.cache?.has(DN_STAFF_ROLE_ID) || isBotOwner(i.user.id, i.client);
@@ -1712,11 +1823,8 @@ add(dnCmd, "Farms", "Everyone", async (i) => {
     });
   }
 
-  const siteUrl = `${FARM_SITE}/${encodeURIComponent(dn)}`;
-  const dmEmbed = embed(
-    farm.video_title || `Farm ${dn}`,
-    farm.type ? `Farm type: ${farm.type}` : "All farm links are on the page below.",
-  ).setURL(siteUrl);
+  const siteUrl = `${FARM_SITE}/${encodeURIComponent(farm.dn)}`;
+  const dmEmbed = await buildDnEmbed(farm);
 
   if (send === "here") {
     if (!bypass) store.setDnCooldown(i.user.id);
@@ -1732,11 +1840,12 @@ add(dnCmd, "Farms", "Everyone", async (i) => {
     });
   }
   if (!bypass) store.setDnCooldown(i.user.id);
-  return respond(i,
-    { content: `Sent you the farm link for \`${dn}\` — check your DMs.`,
+  return respond(i, {
+    content: `Sent you the farm link for \`${farm.dn}\` — check your DMs.`,
     ephemeral: true,
   });
 });
+commands.find((c) => c.data.name === "dn").autocomplete = dnAutocomplete;
 
 // ---------------- Per-guild wiki ----------------
 function isValidHttpUrl(value) {
@@ -1951,5 +2060,9 @@ module.exports = {
   sendDM,
   farmPages,
   farmListEmbed,
+  pingStaleTickets,
+  formatIdle,
+  buildDnEmbed,
+  dnMissMessage,
   FARM_TYPES,
 };

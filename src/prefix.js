@@ -12,6 +12,10 @@ const {
   managerCheck,
   isBotOwner,
   DN_STAFF_ROLE_ID,
+  buildDnEmbed,
+  dnMissMessage,
+  pingStaleTickets,
+  formatIdle,
   stamp,
   logCommand,
   logModeration,
@@ -265,42 +269,6 @@ async function handlePrefixMessage(message) {
   if (command.name === "invite") {
     return reply(message, {
       components: [embed("Invite Mihulish", "Click the link below to invite me to your server.\nhttps://invite.ro-mihaiu.xyz")],
-    });
-  }
-
-  if (command.name === "vote") {
-    const result = store.vote(message.guild.id, message.author.id);
-    if (!result.ok) {
-      return reply(message, {
-        components: [
-          embed("Vote cooldown", `You can vote again in **${result.remainingMinutes}** minute(s).\nCurrent streak: **${result.streak}** 🔥`),
-        ],
-      });
-    }
-    const desc = [];
-    desc.push(`**Your vote** has been recorded!`);
-    desc.push(`**Server streak:** **${result.streak}** 🔥`);
-    if (result.isNewStreak) desc.push("*(streak reset — votes had expired)*");
-    if (result.prevVoterId && result.prevVoterId !== message.author.id) {
-      desc.push(`Last vote by <@${result.prevVoterId}>`);
-    }
-    return reply(message, {
-      components: [embed("Vote recorded", desc.join("\n"))],
-    });
-  }
-
-  if (command.name === "votes") {
-    const v = store.getVotes(message.guild.id);
-    const desc = [];
-    desc.push(`**Current streak:** **${v.streak}** 🔥`);
-    if (v.lastVoterId) {
-      desc.push(`Last vote by <@${v.lastVoterId}>`);
-      desc.push(`<t:${Math.floor(v.lastVoteAt / 1000)}:R>`);
-    } else {
-      desc.push("No votes yet — use `" + p + "vote` to start the streak!");
-    }
-    return reply(message, {
-      components: [embed("Server vote streak", desc.join("\n"))],
     });
   }
 
@@ -1064,6 +1032,40 @@ async function handlePrefixMessage(message) {
     });
   }
 
+  if (command.name === "ticket") {
+    if (!staffCheck(message.guild.id, message.member, message.client)) {
+      return reply(message, "You must be configured staff to use this command.");
+    }
+    const [sub, hoursArg] = command.arguments;
+    if (sub !== "ping")
+      return reply(message, `Usage: \`${p}ticket ping <hours>\``);
+    const hours = parseInt(hoursArg, 10);
+    if (!hours || hours < 1 || hours > 720)
+      return reply(message, `Usage: \`${p}ticket ping <hours>\` — 1 to 720.`);
+    const { stale, sent, skipped } = await pingStaleTickets(message.guild, hours);
+    if (!stale.length)
+      return reply(message, `Every open ticket has had a staff reply in the last **${hours}h**.`);
+    const lines = stale.map(
+      (entry) =>
+        `<#${entry.channel.id}> — idle **${formatIdle(entry.idleMs)}** · ${
+          entry.lastStaffId ? `last staff <@${entry.lastStaffId}>` : "no staff reply yet"
+        }`,
+    );
+    const notes = [];
+    if (sent < stale.length) notes.push(`${stale.length - sent} could not be pinged.`);
+    if (skipped.length) notes.push(`${skipped.length} ticket(s) skipped.`);
+    return reply(message, {
+      components: [
+        embed(
+          `Pinged ${sent} ticket(s)`,
+          `Stale for more than **${hours}h**:\n${lines.join("\n")}${
+            notes.length ? `\n\n*${notes.join(" ")}*` : ""
+          }`,
+        ),
+      ],
+    });
+  }
+
   if (command.name === "channels") {
     if (!managerCheck(message.guild.id, message.member, message.client)) {
       return reply(message, "Only managers can configure farm channels.");
@@ -1232,10 +1234,11 @@ async function handlePrefixMessage(message) {
   }
 
   if (command.name === "dn") {
-    const dn = command.arguments[0];
-    if (!dn) return reply(message, `Usage: \`${p}dn <dn>\``);
+    const rawDn = command.arguments.join("");
+    const dn = store.normalizeDn(rawDn);
+    if (!dn) return reply(message, `Usage: \`${p}dn <dn>\` — for example \`${p}dn 467\` or \`${p}dn B105\``);
     const farm = store.getFarm(message.guild.id, dn);
-    if (!farm) return reply(message, `No farm found for DN \`${dn}\`.`);
+    if (!farm) return reply(message, dnMissMessage(message.guild.id, dn));
     const last = store.getDnCooldown(message.author.id);
     const bypass =
       message.member?.roles?.cache?.has(DN_STAFF_ROLE_ID) ||
@@ -1244,21 +1247,14 @@ async function handlePrefixMessage(message) {
       const remaining = Math.ceil((2 * 60 * 1000 - (Date.now() - last)) / 1000);
       return reply(message, `Please wait ${remaining}s before using \`${p}dn\` again.`);
     }
-    const siteUrl = `https://theysix.ro-mihaiu.xyz/farm/java/${encodeURIComponent(dn)}`;
+    const siteUrl = `https://theysix.ro-mihaiu.xyz/farm/java/${encodeURIComponent(farm.dn)}`;
     try {
-      await message.author.send({
-        embeds: [
-          embed(
-            farm.video_title || `Farm ${dn}`,
-            farm.type ? `Farm type: ${farm.type}` : "All farm links are on the page below.",
-          ).setURL(siteUrl),
-        ],
-      });
+      await message.author.send({ embeds: [await buildDnEmbed(farm)] });
     } catch {
       return reply(message, `Couldn't DM you (your DMs may be closed) — here's the link: ${siteUrl}`);
     }
     if (!bypass) store.setDnCooldown(message.author.id);
-    return reply(message, `Sent you the farm link for \`${dn}\` — check your DMs.`);
+    return reply(message, `Sent you the farm link for \`${farm.dn}\` — check your DMs.`);
   }
 
   if (command.name === "cmd") {
