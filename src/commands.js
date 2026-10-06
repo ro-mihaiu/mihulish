@@ -1184,12 +1184,17 @@ function formatIdle(ms) {
 // Find open tickets whose newest *staff* message (falling back to the newest
 // activity) is older than `hours`, then ping the ticket owner plus the staff
 // member who last replied. Shared by `/ticket ping:<hours>` and the nightly
-// sweep in index.js so both agree on what counts as stale.
+// sweep in index.js so both agree on what counts as stale. Tickets whose owner
+// turned pings off (`/ticket ping:<off>`) are skipped entirely.
 async function pingStaleTickets(guild, hours, { limit = 25, markActive = true } = {}) {
   const cutoff = Date.now() - hours * 3600 * 1000;
   const stale = [];
   const skipped = [];
   for (const t of store.listOpenTickets(guild.id)) {
+    if (store.ticketPingDisabled(guild.id, t.channel_id)) {
+      skipped.push({ ticket: t, reason: "pings disabled for this ticket" });
+      continue;
+    }
     const channel = guild.channels.cache.get(t.channel_id);
     if (!channel?.isTextBased()) {
       skipped.push({ ticket: t, reason: "channel not cached" });
@@ -1205,20 +1210,20 @@ async function pingStaleTickets(guild, hours, { limit = 25, markActive = true } 
     const lastActivity = lastStaffMsg?.createdTimestamp || t.last_message_at || t.created_at;
     if (lastActivity >= cutoff) continue;
 
-    const targetIds = [];
-    if (t.ticket_user_id) targetIds.push(t.ticket_user_id);
+    const targetIds = [t.ticket_user_id];
     if (lastStaffMsg && !targetIds.includes(lastStaffMsg.author.id))
       targetIds.push(lastStaffMsg.author.id);
     if (t.assigned_staff_id && !targetIds.includes(t.assigned_staff_id))
       targetIds.push(t.assigned_staff_id);
-    if (!targetIds.length) {
+    if (targetIds.filter(Boolean).length < 1) {
       skipped.push({ ticket: t, reason: "no one to ping" });
       continue;
     }
     stale.push({
       ticket: t,
       channel,
-      targetIds,
+      // Filter in case the ticket owner id is missing (legacy rows).
+      targetIds: targetIds.filter(Boolean),
       lastStaffId: lastStaffMsg?.author.id || null,
       idleMs: Date.now() - lastActivity,
     });
@@ -1246,17 +1251,50 @@ async function pingStaleTickets(guild, hours, { limit = 25, markActive = true } 
 const ticketCmd = new SlashCommandBuilder()
   .setName("ticket")
   .setDescription("Ticket utilities")
-  .addIntegerOption((o) =>
+  .addStringOption((o) =>
     o
       .setName("ping")
-      .setDescription("Ping tickets with no staff reply for this many hours")
+      .setDescription("Ping tickets with no staff reply for this many hours, or toggle pings in the current ticket")
       .setRequired(true)
-      .setMinValue(1)
-      .setMaxValue(720),
+      .addChoices(
+        { name: "on — re-enable ticket pings", value: "on" },
+        { name: "off — stop pinging this ticket", value: "off" },
+        { name: "12h", value: "12" },
+        { name: "24h", value: "24" },
+        { name: "48h", value: "48" },
+        { name: "72h", value: "72" },
+        { name: "1 week", value: "168" },
+      ),
   );
 add(ticketCmd, "Tickets", "Staff", async (i) => {
   if (!staff(i)) return deny(i);
-  const hours = i.options.getInteger("ping");
+  const raw = i.options.getString("ping", true);
+
+  // `/ticket ping:<on/off>` toggles pings for the current ticket. Default is
+  // on; when off, neither the sweep nor `/ticket ping` pings anyone here.
+  if (raw === "on" || raw === "off") {
+    const t = store.ticket(i.guildId, i.channelId);
+    if (!t || t.status !== "OPEN")
+      return respond(i, {
+        content: "Run this inside the ticket channel you want to toggle.",
+        ephemeral: true,
+      });
+    store.setTicketPingDisabled(i.guildId, i.channelId, raw === "off");
+    return respond(i, {
+      content:
+        raw === "off"
+          ? "Ticket pings are now **off** for this ticket — no one will be pinged here."
+          : "Ticket pings are now **on** for this ticket.",
+      ephemeral: true,
+    });
+  }
+
+  const hours = Number.parseInt(raw, 10);
+  if (!hours || hours < 1 || hours > 720)
+    return respond(i, {
+      content: "Use `/ticket ping:<on|off>` to toggle pings in this ticket, or a 1–720 hour value to ping stale tickets.",
+      ephemeral: true,
+    });
   const { stale, sent, skipped } = await pingStaleTickets(i.guild, hours);
   if (!stale.length)
     return respond(i, {

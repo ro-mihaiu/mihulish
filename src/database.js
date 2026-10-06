@@ -79,6 +79,13 @@ try {
 } catch (error) {
   if (!error.message.includes("duplicate column name")) throw error;
 }
+// Per-ticket ping toggle: 0 (default) = ping the ticket when it goes stale,
+// 1 = never ping anyone in this ticket (set with `/ticket ping:<off>`).
+try {
+  db.exec("ALTER TABLE tickets ADD COLUMN ping_disabled INTEGER NOT NULL DEFAULT 0");
+} catch (error) {
+  if (!error.message.includes("duplicate column name")) throw error;
+}
 try {
   db.exec("ALTER TABLE sticky_messages ADD COLUMN format TEXT NOT NULL DEFAULT 'plain'");
 } catch (error) {
@@ -381,6 +388,18 @@ function assignTicket(g, c, u) {
 }
 function updateTicketLastMessage(g, c) {
   db.prepare("UPDATE tickets SET last_message_at=? WHERE guild_id=? AND channel_id=?").run(Date.now(), g, c);
+}
+function ticketPingDisabled(g, c) {
+  const row = db
+    .prepare("SELECT ping_disabled FROM tickets WHERE guild_id=? AND channel_id=?")
+    .get(g, c);
+  return Boolean(row?.ping_disabled);
+}
+function setTicketPingDisabled(g, c, disabled) {
+  db.prepare(
+    "UPDATE tickets SET ping_disabled=? WHERE guild_id=? AND channel_id=?",
+  ).run(disabled ? 1 : 0, g, c);
+  return ticketPingDisabled(g, c);
 }
 function listOpenTickets(g) {
   ensureGuild(g);
@@ -983,6 +1002,8 @@ module.exports = {
   saveTicket,
   assignTicket,
   deleteTicket,
+  ticketPingDisabled,
+  setTicketPingDisabled,
   addStaffTag,
   removeStaffTag,
   removeAllStaffTags,

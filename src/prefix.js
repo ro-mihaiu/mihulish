@@ -1059,12 +1059,28 @@ async function handlePrefixMessage(message) {
     if (!staffCheck(message.guild.id, message.member, message.client)) {
       return reply(message, "You must be configured staff to use this command.");
     }
-    const [sub, hoursArg] = command.arguments;
+    const [sub, valueArg] = command.arguments;
     if (sub !== "ping")
-      return reply(message, `Usage: \`${p}ticket ping <hours>\``);
-    const hours = parseInt(hoursArg, 10);
+      return reply(message, `Usage: \`${p}ticket ping <hours|on|off>\``);
+
+    // `m.ticket ping on|off` toggles pings for the current ticket (default on).
+    if (valueArg && /^(on|off)$/i.test(valueArg.trim())) {
+      const off = valueArg.trim().toLowerCase() === "off";
+      const t = store.ticket(message.guild.id, message.channel.id);
+      if (!t || t.status !== "OPEN")
+        return reply(message, "Run this inside the ticket channel you want to toggle.");
+      store.setTicketPingDisabled(message.guild.id, message.channel.id, off);
+      return reply(
+        message,
+        off
+          ? "Ticket pings are now **off** for this ticket — no one will be pinged here."
+          : "Ticket pings are now **on** for this ticket.",
+      );
+    }
+
+    const hours = parseInt(valueArg, 10);
     if (!hours || hours < 1 || hours > 720)
-      return reply(message, `Usage: \`${p}ticket ping <hours>\` — 1 to 720.`);
+      return reply(message, `Usage: \`${p}ticket ping <hours|on|off>\` — 1 to 720, or on/off for this ticket.`);
     const { stale, sent, skipped } = await pingStaleTickets(message.guild, hours);
     if (!stale.length)
       return reply(message, `Every open ticket has had a staff reply in the last **${hours}h**.`);
