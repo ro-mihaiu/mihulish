@@ -1207,7 +1207,15 @@ async function pingStaleTickets(guild, hours, { limit = 25, markActive = true } 
     const lastStaffMsg = recent.filter(
       (m) => !m.author.bot && store.isStaff(guild.id, m.author.id),
     ).pop();
-    const lastActivity = lastStaffMsg?.createdTimestamp || t.last_message_at || t.created_at;
+    // Take the NEWER of the last staff message and the DB's last-activity
+    // timestamp: the sweep itself records its ping as activity (markActive),
+    // and using `||` here would ignore that reset whenever an old staff
+    // message is still in the recent window — pinging the ticket again on
+    // every sweep instead of waiting a full `hours`.
+    const lastActivity = Math.max(
+      lastStaffMsg?.createdTimestamp || 0,
+      t.last_message_at || t.created_at || 0,
+    );
     if (lastActivity >= cutoff) continue;
 
     const targetIds = [t.ticket_user_id];
