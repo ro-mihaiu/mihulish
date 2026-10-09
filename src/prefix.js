@@ -16,6 +16,7 @@ const {
   dnMissMessage,
   dnLinkStyle,
   DN_LINK_STYLES,
+  findFarmByVideo,
   pingStaleTickets,
   formatIdle,
   stamp,
@@ -34,7 +35,7 @@ const {
   embedResultEmbed,
   EMBED_MAX_CONTENT,
 } = require("./commands");
-const { fetchVideoTitle } = require("./utils");
+const { fetchVideoTitle, searchWikis } = require("./utils");
 
 const DEFAULT_PREFIX = "m.";
 
@@ -1328,6 +1329,53 @@ async function handlePrefixMessage(message) {
         ),
       ],
     });
+  }
+
+  if (command.name === "wiki") {
+    const [sub, ...rest] = command.arguments;
+    if (sub !== "article")
+      return reply(message, `Usage: \`${p}wiki article <keyword or article name>\` — searches the TheySix wiki and minecraft.wiki.`);
+    const query = rest.join(" ").trim();
+    if (!query) return reply(message, `Usage: \`${p}wiki article <keyword or article name>\``);
+    const { results, errors } = await searchWikis(query);
+    if (!results.length)
+      return reply(message, `No wiki articles found for **${query}**.${errors.length ? " (A wiki source was unreachable.)" : ""}`);
+    const lines = results.map(
+      (r) =>
+        `**[${r.title}](${r.url})** — ${r.source}${r.description ? `\n${r.description.slice(0, 200)}` : ""}`,
+    );
+    return reply(message, { components: [embed(`Wiki: ${query}`, lines.join("\n\n"))] });
+  }
+
+  if (command.name === "vd") {
+    const url = command.arguments.join(" ").trim();
+    if (!url)
+      return reply(message, `Usage: \`${p}vd <video link>\` — same as \`${p}dn\` but with the video URL.`);
+    if (!/^https?:\/\//i.test(url))
+      return reply(message, "That doesn't look like a video link — it should start with `http://` or `https://`.");
+    const farm = findFarmByVideo(message.guild.id, url);
+    if (!farm)
+      return reply(message, `No farm found with that video link. Try the DN instead with \`${p}dn\`.`);
+    const last = store.getDnCooldown(message.author.id);
+    const bypass =
+      message.member?.roles?.cache?.has(DN_STAFF_ROLE_ID) ||
+      isBotOwner(message.author.id, message.client);
+    if (!bypass && last && Date.now() - last < 2 * 60 * 1000) {
+      const remaining = Math.ceil((2 * 60 * 1000 - (Date.now() - last)) / 1000);
+      return reply(message, `Please wait ${remaining}s before using \`${p}vd\` again.`);
+    }
+    const siteUrl = `https://theysix.ro-mihaiu.xyz/farm/java/${encodeURIComponent(farm.dn)}`;
+    try {
+      const { embed: dnEmbed, row } = await buildDnEmbed(farm, message.guild.id, message.author);
+      await message.author.send({
+        embeds: [dnEmbed],
+        components: row ? [row] : [],
+      });
+    } catch {
+      return reply(message, `Couldn't DM you (your DMs may be closed) — here's the link: ${siteUrl}`);
+    }
+    if (!bypass) store.setDnCooldown(message.author.id);
+    return reply(message, `Sent you the farm link for \`${farm.dn}\` — check your DMs.`);
   }
 
   if (command.name === "cmd") {

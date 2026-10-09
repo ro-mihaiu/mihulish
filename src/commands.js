@@ -14,7 +14,7 @@ const fs = require("fs");
 const path = require("path");
 const { AttachmentBuilder } = require("discord.js");
 const store = require("./database");
-const { makeEmbed, logCommand, logEvent, logModeration, sendDM, fetchVideoTitle, resolveThumbnail } = require("./utils");
+const { makeEmbed, logCommand, logEvent, logModeration, sendDM, fetchVideoTitle, resolveThumbnail, searchWikis } = require("./utils");
 const COLOR = 0xe91e63;
 const DOCS = "https://mihulish.ro-mihaiu.xyz";
 const metadata = [];
@@ -1962,6 +1962,89 @@ add(dnCmd, "Farms", "Everyone", async (i) => {
 });
 commands.find((c) => c.data.name === "dn").autocomplete = dnAutocomplete;
 
+// `/vd` is `/dn` by video link: people often only have the YouTube URL (from a
+// search or a pasted link) and can't find the DN. Matches the exact video URL
+// first, then any farm whose stored link contains the given one or vice versa
+// (mobile `youtu.be` links vs the stored `watch?v=` form), and reuses the whole
+// /dn delivery flow: same cooldown, same embed, same DM default.
+function findFarmByVideo(guildId, rawUrl) {
+  const url = rawUrl.trim();
+  const farms = store.listFarms(guildId);
+  const exact = farms.find((f) => f.video === url);
+  if (exact) return exact;
+  let videoId = null;
+  try {
+    const u = new URL(url);
+    videoId = u.hostname.includes("youtu.be") ? u.pathname.slice(1) : u.searchParams.get("v");
+  } catch {}
+  if (videoId)
+    return farms.find((f) => f.video && f.video.includes(videoId)) || null;
+  return farms.find((f) => f.video && (f.video.includes(url) || url.includes(f.video))) || null;
+}
+const vdCmd = new SlashCommandBuilder()
+  .setName("vd")
+  .setDescription("Find a farm by its video link")
+  .addStringOption((o) =>
+    o
+      .setName("link")
+      .setDescription("The video URL, for example https://youtu.be/…")
+      .setRequired(true)
+      .setMaxLength(400),
+  )
+  .addStringOption((o) =>
+    o.setName("send")
+      .setDescription("Where to send the farm link (default: DMs)")
+      .addChoices({ name: "here", value: "here" }, { name: "dms", value: "dms" }),
+  );
+add(vdCmd, "Farms", "Everyone", async (i) => {
+  const url = i.options.getString("link").trim();
+  const send = i.options.getString("send") || "dms";
+  if (!/^https?:\/\//i.test(url))
+    return respond(i, {
+      content: "That doesn't look like a video link — it should start with `http://` or `https://`.",
+      ephemeral: true,
+    });
+  const farm = findFarmByVideo(i.guildId, url);
+  if (!farm)
+    return respond(i, {
+      content: `No farm found with that video link. Try the DN instead with \`/dn\` — start typing there to browse every DN.`,
+      ephemeral: true,
+    });
+
+  const last = store.getDnCooldown(i.user.id);
+  const bypass = i.member?.roles?.cache?.has(DN_STAFF_ROLE_ID) || isBotOwner(i.user.id, i.client);
+  if (!bypass && last && Date.now() - last < DN_COOLDOWN_MS) {
+    const remaining = Math.ceil((DN_COOLDOWN_MS - (Date.now() - last)) / 1000);
+    return respond(i, {
+      content: `Please wait ${remaining}s before using \`/vd\` again.`,
+      ephemeral: true,
+    });
+  }
+
+  const siteUrl = `${FARM_SITE}/${encodeURIComponent(farm.dn)}`;
+  const { embed: dnEmbed, row } = await buildDnEmbed(farm, i.guildId, i.user);
+  const payload = { components: row ? [dnEmbed, row] : [dnEmbed] };
+
+  if (send === "here") {
+    if (!bypass) store.setDnCooldown(i.user.id);
+    return respond(i, payload);
+  }
+
+  try {
+    await i.user.send({ embeds: [dnEmbed], components: row ? [row] : [] });
+  } catch {
+    return respond(i, {
+      content: `Couldn't DM you (your DMs may be closed) — here's the link: ${siteUrl}`,
+      ephemeral: true,
+    });
+  }
+  if (!bypass) store.setDnCooldown(i.user.id);
+  return respond(i, {
+    content: `Sent you the farm links for \`${farm.dn}\` — check your DMs.`,
+    ephemeral: true,
+  });
+});
+
 const dnStyleCmd = new SlashCommandBuilder()
   .setName("dnstyle")
   .setDescription("Choose how farm links are delivered in /dn embeds")
@@ -2040,6 +2123,18 @@ const wikiCmd = new SlashCommandBuilder()
   )
   .addSubcommand((s) =>
     s
+      .setName("article")
+      .setDescription("Search the TheySix wiki and minecraft.wiki for an article")
+      .addStringOption((o) =>
+        o
+          .setName("keyword")
+          .setDescription("Keyword or article name to search for, for example hopper")
+          .setRequired(true)
+          .setMaxLength(100),
+      ),
+  )
+  .addSubcommand((s) =>
+    s
       .setName("show")
       .setDescription("Show a wiki entry")
       .addStringOption((o) =>
@@ -2052,6 +2147,24 @@ const wikiCmd = new SlashCommandBuilder()
   );
 add(wikiCmd, "Utility", "Manage Messages", async (i) => {
   const sub = i.options.getSubcommand();
+
+  if (sub === "article") {
+    // Free-text search across both wikis; results come from the web, so defer.
+    const query = i.options.getString("keyword").trim();
+    await i.deferReply().catch(() => {});
+    const { results, errors } = await searchWikis(query);
+    if (!results.length)
+      return respond(i, {
+        content: `No wiki articles found for **${query}**.${errors.length ? " (A wiki source was unreachable.)" : ""}`,
+      });
+    const lines = results.map(
+      (r) =>
+        `**[${r.title}](${r.url})** — ${r.source}${r.description ? `\n${r.description.slice(0, 200)}` : ""}`,
+    );
+    return respond(i, {
+      components: [embed(`Wiki: ${query}`, lines.join("\n\n"))],
+    });
+  }
 
   if (sub === "add") {
     if (
@@ -2792,6 +2905,7 @@ module.exports = {
   dnMissMessage,
   dnLinkStyle,
   dnButtonRow,
+  findFarmByVideo,
   DN_BUTTON_TTL_MS,
   DN_LINK_STYLES,
   FARM_TYPES,
