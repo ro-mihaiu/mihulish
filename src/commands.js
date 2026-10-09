@@ -2706,7 +2706,8 @@ add(learnCmd, "Utility", "Manage Messages", async (i) => {
     if (!channel.isTextBased() || channel.isVoiceBased())
       return deny(i, "Please choose a text channel.");
     const limit = i.options.getInteger("limit") || 50;
-    await i.deferReply({ flags: 64 });
+    // The command dispatcher (index.js) already deferred this interaction, so
+    // respond() will edit the existing reply instead of deferring again.
     const results = await learnFromTranscriptChannel(i.guild, channel, limit);
     const summary = [
       `Processed: ${results.processed} transcript(s)`,
@@ -2716,7 +2717,7 @@ add(learnCmd, "Utility", "Manage Messages", async (i) => {
     const details = results.errors.length
       ? `\n\n**Errors:**\n${results.errors.slice(0, 5).map((e) => `• ${e}`).join("\n")}${results.errors.length > 5 ? `\n…and ${results.errors.length - 5} more` : ""}`
       : "";
-    return i.editReply({
+    return respond(i, {
       content: `Transcript import complete.\n${summary.join("\n")}${details}`,
     });
   }
