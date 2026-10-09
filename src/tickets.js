@@ -201,10 +201,8 @@ async function openTicket(interaction, panel) {
   );
   created.setFooter({ text: `Mihulish | Ticket System · #${panel}` });
   await channel.send({
-    content: managerRoleId ? `<@&${managerRoleId}>` : undefined,
     embeds: [created],
     components: [ticketControls(false)],
-    allowedMentions: managerRoleId ? { roles: [managerRoleId] } : undefined,
   });
 
   await logToChannel(guild, {

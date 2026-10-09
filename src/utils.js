@@ -39,7 +39,7 @@ async function logCommand(guildId, client, { command, input = "", user, channelN
     ].join("\n");
     await ch.send(embedPayload("Command Log", description));
   } catch (error) {
-    console.error("Failed to log command:", error);
+    console.error(`[log-command] could not send to ${guildId}: ${error.code ?? error.message}`);
   }
 }
 
@@ -49,7 +49,9 @@ async function logEvent(guildId, client, { title = "Event Log", description = "N
   try {
     await ch.send(embedPayload(title, description));
   } catch (error) {
-    console.error("Failed to log event:", error);
+    // Missing Access / channel gone are common (bot kicked, channel deleted);
+    // log a one-liner instead of the full API stack.
+    console.error(`[log-event] could not send to ${guildId}: ${error.code ?? error.message}`);
   }
 }
 
@@ -67,7 +69,7 @@ async function logModeration(guildId, client, { action, targetId, moderatorId, r
     ].join("\n");
     await ch.send(embedPayload("Moderation Log", desc));
   } catch (error) {
-    console.error("Failed to log moderation:", error);
+    console.error(`[log-moderation] could not send to ${guildId}: ${error.code ?? error.message}`);
   }
 }
 
