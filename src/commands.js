@@ -84,10 +84,18 @@ function manager(i) {
   return isBotOwner(i.user?.id, i.client) || managerCheck(i.guildId, i.member, i.client);
 }
 function respond(i, payload) {
+  // A forgotten await (passing a Promise as the payload) would otherwise be
+  // spread into an empty object and fail with "Cannot send an empty message".
+  if (payload && typeof payload.then === "function")
+    return payload.then((resolved) => respond(i, resolved));
   const response = normalizeResponse(payload);
-  if (i.deferred) return i.editReply(response);
+  if (!response.content && !response.embeds?.length && !response.files?.length) {
+    // Never send an empty message — say something instead of 50006.
+    response.content = "Done.";
+  }
+  if (!i.deferred) return i.reply(response);
   if (i.replied) return i.followUp(response);
-  return i.reply(response);
+  return i.editReply(response);
 }
 
 function deny(i, text = "You must be configured staff to use this command.") {
@@ -1349,14 +1357,16 @@ const panelCmd = new SlashCommandBuilder()
   .setDescription("Post the ticket panel so users can open tickets");
 add(panelCmd, "Tickets", "Manager", async (i) => {
   if (!manager(i)) return deny(i, "Only managers can post the ticket panel.");
-  return respond(i, runPanelCommand(i));
+  // runPanelCommand is async — await it, otherwise respond() spreads a Promise
+  // into an empty payload and editReply fails with "Cannot send an empty message".
+  return respond(i, await runPanelCommand(i));
 });
 
 const closeCmd = new SlashCommandBuilder()
   .setName("close")
   .setDescription("Close the current ticket and save a transcript");
 add(closeCmd, "Tickets", "Staff", async (i) => {
-  return respond(i, runCloseCommand(i));
+  return respond(i, await runCloseCommand(i));
 });
 
 // ---------------- Ported from Drako Bot: /purge, /snipe, /addrole,
