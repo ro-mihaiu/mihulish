@@ -379,6 +379,9 @@ client.on(Events.InteractionCreate, async (i) => {
       `[mihulish] someone ran /${i.commandName} in ${i.guildId} and got this error ${e.name}`,
       e,
     );
+    // Also surface the stack on the console so a container log shows exactly
+    // which line failed without needing to pull the log file.
+    console.error(e.stack || e);
     await i.editReply({
       content: "Mihulish could not complete that request.",
     }).catch(() => {});

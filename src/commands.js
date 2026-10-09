@@ -1407,7 +1407,8 @@ add(purgeCmd, "Moderation", "Manage Messages", async (i) => {
     return deny(i, "You need Manage Messages.");
   const count = i.options.getInteger("count", true);
   const user = i.options.getUser("user");
-  await i.deferReply({ flags: 64 });
+  // The command dispatcher already deferred the interaction, so everything
+  // goes through respond()/editReply — deferring again would throw.
   let fetched = await i.channel.messages.fetch({ limit: 100 });
   if (user) fetched = fetched.filter((m) => m.author.id === user.id);
   const deletable = [...fetched.values()]

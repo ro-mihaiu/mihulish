@@ -293,9 +293,12 @@ async function deleteTicket(interaction) {
     return notice(interaction, "Only staff can delete a ticket.");
 
   await interaction.deferReply({ flags: 64 });
+  const logTo = store.settings(guild.id)?.log_channel_id
+    ? guild.channels.cache.get(store.settings(guild.id).log_channel_id)
+    : null;
   const status = t.status === "CLOSED" ? "deleted (was closed)" : "deleted";
   await generateAndPostTranscript(guild, interaction.channel, t, status, interaction.user);
-  await interaction.editReply({ content: "Transcript saved. Deleting ticket in 5 seconds…" });
+  await interaction.editReply({ content: `Transcript saved${logTo ? ` in <#${logTo.id}>` : ""}. Deleting ticket in 5 seconds…` });
   await logToChannel(guild, {
     embeds: [
       embed("Ticket deleted",
