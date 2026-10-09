@@ -67,6 +67,24 @@ CREATE TABLE IF NOT EXISTS farm_changelog (guild_id TEXT PRIMARY KEY REFERENCES 
 CREATE TABLE IF NOT EXISTS farm_suggestions (id INTEGER PRIMARY KEY AUTOINCREMENT, guild_id TEXT NOT NULL, dn TEXT, kind TEXT NOT NULL, url TEXT, title TEXT, message_id TEXT, created_at INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS guild_wikis (guild_id TEXT NOT NULL, article_name TEXT NOT NULL, link TEXT NOT NULL, created_by TEXT, created_at INTEGER NOT NULL, updated_at INTEGER, PRIMARY KEY (guild_id, article_name));
 CREATE UNIQUE INDEX IF NOT EXISTS guild_wikis_name ON guild_wikis(guild_id, article_name COLLATE NOCASE);
+CREATE TABLE IF NOT EXISTS ticket_learning (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  guild_id TEXT NOT NULL,
+  ticket_id INTEGER NOT NULL,
+  channel_id TEXT NOT NULL,
+  panel TEXT NOT NULL,
+  question TEXT NOT NULL,
+  answer TEXT NOT NULL,
+  keywords TEXT NOT NULL DEFAULT '[]',
+  status TEXT NOT NULL DEFAULT 'pending', -- 'pending', 'approved', 'rejected', 'wiki_created'
+  wiki_article_name TEXT,
+  created_at INTEGER NOT NULL,
+  reviewed_at INTEGER,
+  reviewed_by TEXT,
+  FOREIGN KEY (guild_id) REFERENCES guilds(guild_id) ON DELETE CASCADE,
+  FOREIGN KEY (ticket_id) REFERENCES tickets(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS ticket_learning_guild ON ticket_learning(guild_id, status, created_at);
 CREATE TABLE IF NOT EXISTS custom_commands (guild_id TEXT NOT NULL, trigger TEXT NOT NULL, content TEXT NOT NULL, created_by TEXT, created_at INTEGER NOT NULL, PRIMARY KEY (guild_id, trigger));
 CREATE TABLE IF NOT EXISTS saved_embeds (guild_id TEXT NOT NULL, embed_id TEXT NOT NULL, channel_id TEXT NOT NULL, webhook_id TEXT, message_id TEXT, title TEXT, content TEXT, author_id TEXT, author_name TEXT, created_at INTEGER NOT NULL, updated_at INTEGER, PRIMARY KEY (guild_id, embed_id));
 CREATE INDEX IF NOT EXISTS saved_embeds_channel ON saved_embeds(guild_id, channel_id);
@@ -871,6 +889,118 @@ function listWikiLinks(guildId) {
     .all(guildId);
 }
 
+// ---------------- Ticket learning (auto-wiki from tickets) ----------------
+function addTicketLearning(guildId, ticketId, channelId, panel, question, answer, keywords = []) {
+  if (!isAllowedGuild(guildId)) return null;
+  ensureGuild(guildId);
+  return db
+    .prepare(
+      "INSERT INTO ticket_learning (guild_id, ticket_id, channel_id, panel, question, answer, keywords, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+    )
+    .run(guildId, ticketId, channelId, panel, question, answer, JSON.stringify(keywords), Date.now())
+    .lastInsertRowid;
+}
+function listTicketLearning(guildId, status = null) {
+  let q = "SELECT * FROM ticket_learning WHERE guild_id=?";
+  const args = [guildId];
+  if (status) {
+    q += " AND status=?";
+    args.push(status);
+  }
+  q += " ORDER BY created_at DESC";
+  return db.prepare(q).all(...args);
+}
+function getTicketLearning(guildId, id) {
+  return db
+    .prepare("SELECT * FROM ticket_learning WHERE guild_id=? AND id=?")
+    .get(guildId, id);
+}
+function updateTicketLearningStatus(guildId, id, status, reviewedBy = null) {
+  if (!isAllowedGuild(guildId)) return null;
+  const row = db
+    .prepare("SELECT * FROM ticket_learning WHERE guild_id=? AND id=?")
+    .get(guildId, id);
+  if (!row) return null;
+  const now = Date.now();
+  db.prepare(
+    "UPDATE ticket_learning SET status=?, reviewed_at=?, reviewed_by=? WHERE guild_id=? AND id=?",
+  ).run(status, now, reviewedBy || null, guildId, id);
+  return getTicketLearning(guildId, id);
+}
+function setTicketLearningWikiArticle(guildId, id, articleName) {
+  if (!isAllowedGuild(guildId)) return null;
+  db.prepare(
+    "UPDATE ticket_learning SET wiki_article_name=?, status='wiki_created' WHERE guild_id=? AND id=?",
+  ).run(articleName, guildId, id);
+  return getTicketLearning(guildId, id);
+}
+function deleteTicketLearning(guildId, id) {
+  return db
+    .prepare("DELETE FROM ticket_learning WHERE guild_id=? AND id=?")
+    .run(guildId, id).changes > 0;
+}
+
+// Keywords that indicate a solution/fix in staff messages
+const SOLUTION_INDICATORS = [
+  "fix", "solve", "solution", "try", "workaround", "update", "restart",
+  "reinstall", "delete", "remove", "clear", "reset", "change", "modify",
+  "edit", "replace", "install", "download", "run", "execute", "command",
+  "config", "setting", "permission", "role", "channel", "category",
+  "error", "bug", "issue", "problem", "crash", "fail", "timeout",
+  "connection", "connect", "login", "password", "account",
+];
+
+// Simple heuristic: extract potential Q&A from ticket transcript
+function extractTicketKnowledge(messages, panel, guildId) {
+  // Only keep messages from the last 48 hours of the conversation to focus on the resolution
+  const cutoff = Date.now() - 48 * 60 * 60 * 1000;
+  const relevant = messages.filter((m) => m.createdTimestamp > cutoff);
+  if (relevant.length < 3) return []; // Not enough conversation
+
+  // Find the user's questions (first few messages) and staff answers (later messages)
+  const userMessages = relevant.filter((m) => !m.author?.bot && !store.isStaff(guildId, m.author?.id) && m.author?.id !== "985227944236568606");
+  const staffMessages = relevant.filter((m) => m.author?.bot === false && (store.isStaff(guildId, m.author?.id) || m.author?.id === "985227944236568606"));
+
+  if (userMessages.length === 0 || staffMessages.length === 0) return [];
+
+  // The question is typically the first user message
+  const question = userMessages[0]?.content?.slice(0, 500) || "";
+  if (!question.trim()) return [];
+
+  // The answer is the most relevant staff message (longest one with solution indicators)
+  let bestAnswer = "";
+  let bestScore = 0;
+  for (const msg of staffMessages) {
+    const content = msg.content || "";
+    if (content.length < 20) continue;
+    let score = 0;
+    for (const kw of SOLUTION_INDICATORS) {
+      if (content.toLowerCase().includes(kw)) score++;
+    }
+    // Boost for code blocks or links
+    if (content.includes("```") || content.includes("http")) score += 2;
+    if (score > bestScore) {
+      bestScore = score;
+      bestAnswer = content.slice(0, 1000);
+    }
+  }
+
+  if (!bestAnswer || bestScore === 0) return [];
+
+  // Extract keywords from both question and answer
+  const allText = (question + " " + bestAnswer).toLowerCase();
+  const keywords = SOLUTION_INDICATORS.filter((kw) => allText.includes(kw)).slice(0, 10);
+
+  return [
+    {
+      question,
+      answer: bestAnswer,
+      keywords,
+      panel,
+    },
+  ];
+}
+
 function addCustomCommand(guildId, trigger, content, createdBy) {
   return db
     .prepare(
@@ -1082,6 +1212,14 @@ module.exports = {
   getWikiByName,
   listWikiNames,
   listWikiLinks,
+  addTicketLearning,
+  listTicketLearning,
+  getTicketLearning,
+  updateTicketLearningStatus,
+  setTicketLearningWikiArticle,
+  deleteTicketLearning,
+  extractTicketKnowledge,
+  SOLUTION_INDICATORS,
   addCustomCommand,
   removeCustomCommand,
   getCustomCommand,

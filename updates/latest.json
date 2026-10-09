@@ -1,7 +1,8 @@
 {
   "date": "2026-10-09",
-  "version": "v1.15.2",
+  "version": "v1.15.3",
   "changes": [
+    "Fixed `/panel` and `/close` slash commands: they were returning response payloads but not actually sending them (the execute handler didn't call `respond()` with the returned data). Both commands now properly post their embeds/components.",
     "Added a full ticket system (ported from Drako Bot): `/panel` posts a ticket panel with an open button per ticket type (java, br, bug, report, partnership); opening a ticket creates a private `panel-username` channel under the support category visible only to the opener, staff and managers, with one open ticket per user per type.",
     "Tickets can be closed with the 🔒 button in the channel or `/close` (staff). Closing renames the channel to `closed-…` (which the existing detector already understands) and staff get 🔓 reopen and 🗑️ delete buttons. Deleting saves a transcript and removes the channel after 5 seconds.",
     "Ticket transcripts are generated as a styled HTML file — full message history with authors, avatars, timestamps, attachment links and embed summaries — and posted to the configured log channel whenever a ticket is closed or deleted. No new dependencies.",

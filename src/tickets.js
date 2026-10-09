@@ -4,8 +4,7 @@
 //
 // Channel naming matches the existing detector in index.js (`panel-username`,
 // with `closed-` prefixed on close) so both flows agree on what a ticket is.
-const {
-  EmbedBuilder,
+const { EmbedBuilder,
   ActionRowBuilder,
   ButtonBuilder,
   ButtonStyle,
@@ -15,6 +14,7 @@ const {
   AttachmentBuilder,
 } = require("discord.js");
 const store = require("./database");
+const { learnFromClosedTicket, isLearningEnabled } = require("./ticket-learning");
 
 const PANEL_CUSTOM_ID = "ticket_open";
 const CLOSE_CUSTOM_ID = "ticket_close";
@@ -231,6 +231,25 @@ async function closeTicket(interaction, { viaCommand = false } = {}) {
   if (!viaCommand) await interaction.deferReply({ flags: 64 });
 
   await generateAndPostTranscript(guild, interaction.channel, t, "closed", interaction.user);
+
+  // Auto-learn from the ticket conversation (if enabled for this guild)
+  if (isLearningEnabled(guild.id)) {
+    try {
+      const result = await learnFromClosedTicket(guild, interaction.channel, t);
+      if (result.learned > 0) {
+        await logToChannel(guild, {
+          embeds: [
+            embed(
+              "Auto-learning",
+              `Extracted ${result.learned} potential knowledge item(s) from this ticket for staff review. Use \`/learn\` to curate.`,
+            ),
+          ],
+        });
+      }
+    } catch (e) {
+      console.error("[tickets] auto-learn failed:", e.message);
+    }
+  }
 
   // Rename with the closed- prefix — the ChannelUpdate handler in index.js
   // will mark the ticket CLOSED and strip the claim automatically.

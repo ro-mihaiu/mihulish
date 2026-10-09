@@ -269,6 +269,7 @@ function buildHelpEmbed(prefix = "m.") {
         { name: "poll", desc: "Create a button-vote poll with optional timer" },
         { name: "remind", desc: "Set a personal reminder that survives restarts" },
         { name: "embed", desc: "Create and manage saved embed messages" },
+        { name: "learn", desc: "Manage auto-learning from tickets (create wiki)" },
         { name: "invite", desc: "Get the bot invite link" },
       ],
     },
@@ -1348,14 +1349,14 @@ const panelCmd = new SlashCommandBuilder()
   .setDescription("Post the ticket panel so users can open tickets");
 add(panelCmd, "Tickets", "Manager", async (i) => {
   if (!manager(i)) return deny(i, "Only managers can post the ticket panel.");
-  return runPanelCommand(i);
+  return respond(i, runPanelCommand(i));
 });
 
 const closeCmd = new SlashCommandBuilder()
   .setName("close")
   .setDescription("Close the current ticket and save a transcript");
 add(closeCmd, "Tickets", "Staff", async (i) => {
-  return runCloseCommand(i);
+  return respond(i, runCloseCommand(i));
 });
 
 // ---------------- Ported from Drako Bot: /purge, /snipe, /addrole,
@@ -2570,6 +2571,136 @@ add(cmdCmd, "Utility", "Manage Messages", async (i) => {
     components: [embed("Custom commands", lines.join("\n"))],
   });
 });
+const { learnFromClosedTicket, reviewTicketLearning, buildLearningReviewEmbed, isLearningEnabled, setLearningEnabled } = require("./ticket-learning");
+
+// ---------------- Ticket Learning (auto-wiki from tickets) ----------------
+const learnCmd = new SlashCommandBuilder()
+  .setName("learn")
+  .setDescription("Manage auto-learning from tickets")
+  .addSubcommand((s) =>
+    s.setName("status").setDescription("Show auto-learning status and pending entries"),
+  )
+  .addSubcommand((s) =>
+    s
+      .setName("enable")
+      .setDescription("Enable auto-learning for this server"),
+  )
+  .addSubcommand((s) =>
+    s
+      .setName("disable")
+      .setDescription("Disable auto-learning for this server"),
+  )
+  .addSubcommand((s) =>
+    s
+      .setName("review")
+      .setDescription("Review a pending learning entry")
+      .addIntegerOption((o) =>
+        o.setName("id").setDescription("Learning entry ID").setRequired(true),
+      )
+      .addStringOption((o) =>
+        o
+          .setName("action")
+          .setDescription("Approve (creates wiki) or reject")
+          .setRequired(true)
+          .addChoices(
+            { name: "Approve", value: "approve" },
+            { name: "Reject", value: "reject" },
+          ),
+      )
+      .addStringOption((o) =>
+        o.setName("name").setDescription("Custom wiki article name (optional)"),
+      ),
+  )
+  .addSubcommand((s) =>
+    s
+      .setName("list")
+      .setDescription("List all learning entries (pending + approved)")
+      .addStringOption((o) =>
+        o
+          .setName("status")
+          .setDescription("Filter by status")
+          .addChoices(
+            { name: "Pending", value: "pending" },
+            { name: "Approved", value: "approved" },
+            { name: "Rejected", value: "rejected" },
+            { name: "Wiki Created", value: "wiki_created" },
+          ),
+      ),
+  );
+add(learnCmd, "Utility", "Manage Messages", async (i) => {
+  if (
+    !i.memberPermissions?.has(PermissionFlagsBits.ManageMessages) &&
+    !isBotOwner(i.user.id, i.client)
+  )
+    return deny(i, "You need Manage Messages to manage auto-learning.");
+  const sub = i.options.getSubcommand();
+
+  if (sub === "status") {
+    const enabled = isLearningEnabled(i.guildId);
+    const pending = store.listTicketLearning(i.guildId, "pending").length;
+    const total = store.listTicketLearning(i.guildId).length;
+    return respond(i, {
+      components: [
+        embed(
+          "Auto-learning status",
+          `Enabled: ${enabled ? "Yes" : "No"}\nPending review: ${pending}\nTotal entries: ${total}`,
+        ),
+      ],
+      ephemeral: true,
+    });
+  }
+
+  if (sub === "enable") {
+    setLearningEnabled(i.guildId, true);
+    return respond(i, { content: "Auto-learning enabled for this server." });
+  }
+
+  if (sub === "disable") {
+    setLearningEnabled(i.guildId, false);
+    return respond(i, { content: "Auto-learning disabled for this server." });
+  }
+
+  if (sub === "review") {
+    const id = i.options.getInteger("id");
+    const action = i.options.getString("action");
+    const name = i.options.getString("name");
+    const entry = store.getTicketLearning(i.guildId, id);
+    if (!entry) return deny(i, `No learning entry found with ID ${id}.`);
+    if (entry.status !== "pending") return deny(i, `This entry is already ${entry.status}.`);
+
+    const result = await reviewTicketLearning(i.guild, i, id, action, name);
+    if (result.error) return deny(i, result.error);
+    return respond(i, { content: result.message });
+  }
+
+  // list
+  const statusFilter = i.options.getString("status");
+  const entries = store.listTicketLearning(i.guildId, statusFilter);
+  if (!entries.length) return respond(i, { content: "No learning entries found." });
+  const lines = entries.map((e) => {
+    const q = e.question.length > 60 ? e.question.slice(0, 60) + "…" : e.question;
+    const a = e.answer.length > 60 ? e.answer.slice(0, 60) + "…" : e.answer;
+    const wiki = e.wiki_article_name ? ` → wiki: **${e.wiki_article_name}**` : "";
+    return `\`#${e.id}\` [${e.status}] ${e.panel || "general"} | Q: ${q} | A: ${a}${wiki}`;
+  });
+  return respond(i, {
+    components: [embed(`Learning entries (${entries.length})`, lines.slice(0, 20).join("\n"))],
+    ephemeral: true,
+  });
+});
+commands.find((c) => c.data.name === "learn").autocomplete = async (i) => {
+  if (i.options.getSubcommand(false) !== "review") return i.respond([]).catch(() => {});
+  const query = String(i.options.getFocused() || "");
+  const choices = store
+    .listTicketLearning(i.guildId, "pending")
+    .filter((e) => !query || String(e.id).includes(query) || e.question.toLowerCase().includes(query.toLowerCase()))
+    .slice(0, 25)
+    .map((e) => ({
+      name: `#${e.id} ${e.question.slice(0, 80)}`.slice(0, 100),
+      value: String(e.id),
+    }));
+  return i.respond(choices).catch(() => {});
+}
 
 // ---------------- Saved embeds ----------------
 // Embeds are posted through a per-channel webhook that is named and dressed
@@ -3208,4 +3339,9 @@ module.exports = {
   handlePollVote,
   finishEndedPolls,
   deliverDueReminders,
+  learnFromClosedTicket,
+  reviewTicketLearning,
+  buildLearningReviewEmbed,
+  isLearningEnabled,
+  setLearningEnabled,
 };

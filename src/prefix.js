@@ -34,6 +34,9 @@ const {
   embedManageGate,
   embedResultEmbed,
   EMBED_MAX_CONTENT,
+  isLearningEnabled,
+  setLearningEnabled,
+  buildLearningReviewEmbed,
 } = require("./commands");
 const { fetchVideoTitle, searchWikis } = require("./utils");
 
@@ -1569,6 +1572,60 @@ async function handlePrefixMessage(message) {
     } catch (e) {
       return reply(message, `I could not post the embed: ${e.message}`);
     }
+  }
+
+  // `m.learn` — manage auto-learning from tickets
+  if (command.name === "learn") {
+    const gate = embedManageGate(message.author.id, message.client, message.member.permissions);
+    if (gate) return reply(message, gate);
+    const [sub, ...args] = command.arguments;
+
+    if (sub === "status") {
+      const enabled = isLearningEnabled(message.guild.id);
+      const pending = store.listTicketLearning(message.guild.id, "pending").length;
+      const total = store.listTicketLearning(message.guild.id).length;
+      return reply(message, `Auto-learning: ${enabled ? "enabled" : "disabled"}\nPending review: ${pending}\nTotal entries: ${total}`);
+    }
+
+    if (sub === "enable") {
+      setLearningEnabled(message.guild.id, true);
+      return reply(message, "Auto-learning enabled for this server.");
+    }
+
+    if (sub === "disable") {
+      setLearningEnabled(message.guild.id, false);
+      return reply(message, "Auto-learning disabled for this server.");
+    }
+
+    if (sub === "review") {
+      const id = parseInt(args[0], 10);
+      const action = args[1];
+      const name = args.slice(2).join(" ") || null;
+      if (!id || !action) return reply(message, `Usage: \`${p}learn review <id> approve|reject [name]\``);
+      const entry = store.getTicketLearning(message.guild.id, id);
+      if (!entry) return reply(message, `No learning entry found with ID ${id}.`);
+      if (entry.status !== "pending") return reply(message, `This entry is already ${entry.status}.`);
+
+      const { reviewTicketLearning } = require("./ticket-learning");
+      const result = await reviewTicketLearning(message.guild, { user: message.author, id: message.author.id }, id, action, name);
+      if (result.error) return reply(message, result.error);
+      return reply(message, result.message);
+    }
+
+    if (sub === "list") {
+      const statusFilter = args[0] || null;
+      const entries = store.listTicketLearning(message.guild.id, statusFilter);
+      if (!entries.length) return reply(message, "No learning entries found.");
+      const lines = entries.map((e) => {
+        const q = e.question.length > 60 ? e.question.slice(0, 60) + "…" : e.question;
+        const a = e.answer.length > 60 ? e.answer.slice(0, 60) + "…" : e.answer;
+        const wiki = e.wiki_article_name ? ` → wiki: **${e.wiki_article_name}**` : "";
+        return `\`#${e.id}\` [${e.status}] ${e.panel || "general"} | Q: ${q} | A: ${a}${wiki}`;
+      });
+      return reply(message, `Learning entries (${entries.length}):\n` + lines.slice(0, 15).join("\n"));
+    }
+
+    return reply(message, `Usage: \`${p}learn status\` | \`${p}learn enable\` | \`${p}learn disable\` | \`${p}learn review <id> approve|reject [name]\` | \`${p}learn list [status]\``);
   }
 
   return reply(
