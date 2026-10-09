@@ -21,6 +21,7 @@ function slugify(text) {
 function mapPanelToPlatform(panel) {
   const mapping = {
     java: "java",
+    bedrock: "bedrock",
     br: "bedrock",
     bug: "java",
     report: "discord",
@@ -161,7 +162,7 @@ function setLearningEnabled(guildId, enabled) {
 
 // ---------------- Transcript import ----------------
 
-function parseTranscriptHtml(html) {
+function parseBotTranscriptHtml(html) {
   const metaMatch = html.match(/<div class="meta">(.*?)<\/div>/s);
   if (!metaMatch) return null;
 
@@ -195,11 +196,95 @@ function parseTranscriptHtml(html) {
   return { panel, owner, messages };
 }
 
+function parseTicketToolTranscriptHtml(html) {
+  const messagesMatch = html.match(/let\s+messages\s*=\s*"([^"]+)"/);
+  if (!messagesMatch) return null;
+
+  let messages = [];
+  try {
+    const decoded = Buffer.from(messagesMatch[1], "base64").toString("utf8");
+    const parsed = JSON.parse(decoded);
+    if (!Array.isArray(parsed)) return null;
+    messages = parsed
+      .map((m) => ({
+        author: m.author?.tag || m.author?.username || m.author?.id || "Unknown",
+        content: m.content || "",
+      }))
+      .filter((m) => m.author !== "Unknown" || m.content);
+  } catch {
+    return null;
+  }
+
+  if (messages.length === 0) return null;
+
+  let panel = "unknown";
+  const knownPanels = ["java", "bedrock", "bug", "report", "partnership", "br"];
+
+  // Try to extract panel from <Server-Info> content
+  const serverMatch = html.match(/<Server-Info[^>]*>([\s\S]*?)<\/Server-Info>/i);
+  if (serverMatch) {
+    const serverText = serverMatch[1].toLowerCase();
+    for (const p of knownPanels) {
+      if (serverText.includes(p)) {
+        panel = p;
+        break;
+      }
+    }
+    if (panel === "unknown") {
+      const channelMatch = serverText.match(/closed-([a-z]+)/i);
+      if (channelMatch) panel = channelMatch[1].toLowerCase();
+    }
+  }
+
+  // Fallback: extract from filename in HTML
+  if (panel === "unknown") {
+    const fileMatch = html.match(/transcript-([a-z]+)-/i);
+    if (fileMatch) panel = fileMatch[1].toLowerCase();
+  }
+
+  // Fallback: extract from title
+  if (panel === "unknown") {
+    const titleMatch = html.match(/<title>([^<]+)<\/title>/i);
+    if (titleMatch) {
+      const title = titleMatch[1].toLowerCase();
+      for (const p of knownPanels) {
+        if (title.includes(p)) {
+          panel = p;
+          break;
+        }
+      }
+    }
+  }
+
+  let owner = "";
+  // Try <User-Info> section
+  const userMatch = html.match(/<User-Info[^>]*>([\s\S]*?)<\/User-Info>/i);
+  if (userMatch) {
+    const userText = userMatch[1];
+    // Look for Discord tag pattern: Username#1234
+    const tagMatch = userText.match(/([^\s<]+#\d{4})/);
+    if (tagMatch) owner = tagMatch[1].trim();
+  }
+
+  // Fallback: use first message author as owner
+  if (!owner && messages.length > 0) {
+    owner = messages[0].author;
+  }
+
+  return { panel, owner, messages };
+}
+
+function parseTranscriptHtml(html) {
+  const ttResult = parseTicketToolTranscriptHtml(html);
+  if (ttResult) return ttResult;
+  return parseBotTranscriptHtml(html);
+}
+
 function extractKnowledgeFromTranscript(transcript) {
-  const { panel, messages } = transcript;
+  const { panel, owner, messages } = transcript;
   if (messages.length < 3) return [];
 
-  const ownerAuthor = messages[0].author;
+  const ownerAuthor = owner || messages[0].author;
   const userMessages = messages.filter((m) => m.author === ownerAuthor);
   const staffMessages = messages.filter((m) => m.author !== ownerAuthor);
 

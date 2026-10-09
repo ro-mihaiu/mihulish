@@ -14,6 +14,7 @@
     "commands-check": "node scripts/commands-check.js"
   },
   "dependencies": {
+    "agent-browser": "^0.38.2",
     "discord.js": "^14.27.0",
     "dotenv": "^17.4.2"
   }
