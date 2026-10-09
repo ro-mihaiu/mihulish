@@ -2581,7 +2581,7 @@ add(cmdCmd, "Utility", "Manage Messages", async (i) => {
     components: [embed("Custom commands", lines.join("\n"))],
   });
 });
-const { learnFromClosedTicket, reviewTicketLearning, buildLearningReviewEmbed, isLearningEnabled, setLearningEnabled } = require("./ticket-learning");
+const { learnFromClosedTicket, reviewTicketLearning, buildLearningReviewEmbed, isLearningEnabled, setLearningEnabled, learnFromTranscriptChannel } = require("./ticket-learning");
 
 // ---------------- Ticket Learning (auto-wiki from tickets) ----------------
 const learnCmd = new SlashCommandBuilder()
@@ -2636,6 +2636,24 @@ const learnCmd = new SlashCommandBuilder()
             { name: "Wiki Created", value: "wiki_created" },
           ),
       ),
+  )
+  .addSubcommand((s) =>
+    s
+      .setName("import")
+      .setDescription("Import learning from ticket transcripts in a channel")
+      .addChannelOption((o) =>
+        o
+          .setName("channel")
+          .setDescription("Channel containing ticket transcripts (HTML attachments)")
+          .setRequired(true),
+      )
+      .addIntegerOption((o) =>
+        o
+          .setName("limit")
+          .setDescription("Max transcripts to process (default: 50)")
+          .setMinValue(1)
+          .setMaxValue(500),
+      ),
   );
 add(learnCmd, "Utility", "Manage Messages", async (i) => {
   if (
@@ -2681,6 +2699,26 @@ add(learnCmd, "Utility", "Manage Messages", async (i) => {
     const result = await reviewTicketLearning(i.guild, i, id, action, name);
     if (result.error) return deny(i, result.error);
     return respond(i, { content: result.message });
+  }
+
+  if (sub === "import") {
+    const channel = i.options.getChannel("channel");
+    if (!channel.isTextBased() || channel.isVoiceBased())
+      return deny(i, "Please choose a text channel.");
+    const limit = i.options.getInteger("limit") || 50;
+    await i.deferReply({ flags: 64 });
+    const results = await learnFromTranscriptChannel(i.guild, channel, limit);
+    const summary = [
+      `Processed: ${results.processed} transcript(s)`,
+      `Learned: ${results.learned} new knowledge item(s)`,
+    ];
+    if (results.errors.length) summary.push(`Errors: ${results.errors.length}`);
+    const details = results.errors.length
+      ? `\n\n**Errors:**\n${results.errors.slice(0, 5).map((e) => `• ${e}`).join("\n")}${results.errors.length > 5 ? `\n…and ${results.errors.length - 5} more` : ""}`
+      : "";
+    return i.editReply({
+      content: `Transcript import complete.\n${summary.join("\n")}${details}`,
+    });
   }
 
   // list
