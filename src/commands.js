@@ -1413,6 +1413,9 @@ add(purgeCmd, "Moderation", "Manage Messages", async (i) => {
   if (user) fetched = fetched.filter((m) => m.author.id === user.id);
   const deletable = [...fetched.values()]
     .filter((m) => Date.now() - m.createdTimestamp < 14 * 24 * 3600 * 1000)
+    // Never bulk-delete this interaction's own deferred reply (the hidden
+    // "thinking" message) — deleting it makes editReply fail with Unknown Message.
+    .filter((m) => m.webhookId !== i.applicationId && m.interaction?.id !== i.id)
     .slice(0, count);
   if (!deletable.length)
     return i.editReply({ content: "No deletable messages found (messages older than 14 days cannot be bulk deleted)." });
@@ -1423,8 +1426,16 @@ add(purgeCmd, "Moderation", "Manage Messages", async (i) => {
     moderatorId: i.user.id,
     reason: `${deletable.length} message(s) in <#${i.channelId}>`,
   });
-  await i.editReply({ content: `Deleted **${deletable.length}** message(s)${user ? ` from <@${user.id}>` : ""}. This notice disappears in 5 seconds.` });
-  setTimeout(() => i.deleteReply().catch(() => {}), 5000);
+  const confirmText = `Deleted **${deletable.length}** message(s)${user ? ` from <@${user.id}>` : ""}. This notice disappears in 5 seconds.`;
+  // bulkDelete can remove the deferred reply itself; fall back to a followUp
+  // so the confirmation still reaches the channel either way.
+  const notice_ = await i.editReply({ content: confirmText }).catch(() =>
+    i.followUp({ content: confirmText }).catch(() => null),
+  );
+  setTimeout(() => {
+    if (notice_ && notice_.deletable) notice_.delete().catch(() => {});
+    i.deleteReply().catch(() => {});
+  }, 5000);
 });
 
 const snipeCmd = new SlashCommandBuilder()
@@ -2831,12 +2842,14 @@ async function patchEmbed({ client, guild, user, row, channel, title, content })
   };
 }
 async function removeEmbed(guild, row) {
-  const hook = row.webhook_id
+  // guild.webhooks can be undefined on partial/guildless contexts; guard it so
+  // the saved row is still deleted even if the webhook lookup fails.
+  const hook = row.webhook_id && guild?.webhooks
     ? await guild.webhooks.fetch(row.webhook_id).catch(() => null)
     : null;
   if (hook && row.message_id)
     await hook.deleteMessage(row.message_id).catch(() => {});
-  store.deleteEmbed(guild.id, row.embed_id);
+  store.deleteEmbed(guild?.id, row.embed_id);
 }
 function canManageEmbed(interaction, row) {
   if (isBotOwner(interaction.user?.id, interaction.client)) return true;
