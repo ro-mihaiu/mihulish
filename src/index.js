@@ -12,7 +12,23 @@ const {
   ButtonBuilder,
   ButtonStyle,
 } = require("discord.js");
-const { commands, store, farmPages, farmListEmbed, buildDnEmbed, dnButtonRow, DN_BUTTON_TTL_MS, pingStaleTickets, handleEmbedButton, handleEmbedModal } = require("./commands");
+const {
+  commands,
+  store,
+  farmPages,
+  farmListEmbed,
+  buildDnEmbed,
+  dnButtonRow,
+  DN_BUTTON_TTL_MS,
+  pingStaleTickets,
+  handleEmbedButton,
+  handleEmbedModal,
+  captureSnipe,
+  handlePollVote,
+  finishEndedPolls,
+  deliverDueReminders,
+} = require("./commands");
+const { handleTicketInteraction } = require("./tickets");
 const { handlePrefixMessage } = require("./prefix");
 const { logCommand, logEvent, sendDM } = require("./commands");
 const logger = require("./logger");
@@ -140,6 +156,12 @@ async function inspectTicket(channel) {
 }
 client.on(Events.ChannelCreate, inspectTicket);
 client.on(Events.ChannelUpdate, (_old, next) => inspectTicket(next));
+client.on(Events.MessageDelete, captureSnipe);
+// Reminders and timed polls: check every 30 seconds.
+setInterval(() => {
+  deliverDueReminders(client).catch((e) => console.error("[reminders]", e.message));
+  finishEndedPolls(client).catch((e) => console.error("[polls]", e.message));
+}, 30000);
 client.on(Events.MessageCreate, handlePrefixMessage);
 const { handleFarmMessage } = require("./farm-detect");
 client.on(Events.MessageCreate, (message) => {
@@ -283,6 +305,18 @@ function buttonNotice(i, content, useEphemeral = true) {
 // already acknowledged the interaction by the time we answer.
 client.on(Events.InteractionCreate, async (i) => {
   if (!i.isButton()) return;
+  if (
+    await handleTicketInteraction(i).catch((e) => {
+      console.error("[tickets]", e.message);
+      return true;
+    })
+  )
+    return;
+  if (await handlePollVote(i).catch((e) => {
+    console.error("[poll-vote]", e.message);
+    return true;
+  }))
+    return;
   const parts = i.customId.split("|");
   if (parts[0] !== "farm_dl") return;
   const [, guildId, dn, kind, expiresRaw] = parts;

@@ -55,6 +55,7 @@ CREATE TABLE IF NOT EXISTS tags (id INTEGER PRIMARY KEY AUTOINCREMENT, guild_id 
 CREATE TABLE IF NOT EXISTS staff_tags (guild_id TEXT NOT NULL, tag_id INTEGER NOT NULL REFERENCES tags(id) ON DELETE CASCADE, user_id TEXT NOT NULL, assigned_by TEXT NOT NULL, created_at INTEGER NOT NULL, PRIMARY KEY(guild_id,tag_id,user_id));
 CREATE TABLE IF NOT EXISTS ticket_panels (guild_id TEXT NOT NULL, panel TEXT NOT NULL, tag_name TEXT, enabled INTEGER NOT NULL DEFAULT 1, PRIMARY KEY(guild_id,panel));
 CREATE TABLE IF NOT EXISTS tickets (id INTEGER PRIMARY KEY AUTOINCREMENT, guild_id TEXT NOT NULL, channel_id TEXT NOT NULL, panel TEXT NOT NULL, ticket_user_id TEXT, status TEXT NOT NULL, created_at INTEGER NOT NULL, closed_at INTEGER, assigned_staff_id TEXT, last_message_at INTEGER, UNIQUE(guild_id,channel_id));
+CREATE TABLE IF NOT EXISTS reminders (id INTEGER PRIMARY KEY AUTOINCREMENT, guild_id TEXT NOT NULL, user_id TEXT NOT NULL, channel_id TEXT NOT NULL, content TEXT NOT NULL, due_at INTEGER NOT NULL, created_at INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS sticky_messages (id INTEGER PRIMARY KEY AUTOINCREMENT, guild_id TEXT NOT NULL, channel_id TEXT NOT NULL, message_id TEXT, content TEXT NOT NULL, updated_at INTEGER NOT NULL, UNIQUE(guild_id,channel_id));
 CREATE TABLE IF NOT EXISTS moderation_logs (id INTEGER PRIMARY KEY AUTOINCREMENT, guild_id TEXT NOT NULL, action TEXT NOT NULL, target_id TEXT, moderator_id TEXT, reason TEXT, created_at INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS original_nicknames (guild_id TEXT NOT NULL, user_id TEXT NOT NULL, nickname TEXT, PRIMARY KEY (guild_id, user_id));
@@ -186,6 +187,37 @@ function ensureGuild(guildId) {
       "INSERT OR IGNORE INTO ticket_panels (guild_id, panel, tag_name) VALUES (?, ?, ?)",
     ).run(guildId, panel, panel);
   }
+}
+function addReminder(g, u, c, content, dueAt) {
+  ensureGuild(g);
+  const info = db
+    .prepare(
+      "INSERT INTO reminders(guild_id,user_id,channel_id,content,due_at,created_at) VALUES(?,?,?,?,?,?)",
+    )
+    .run(g, u, c, content, dueAt, Date.now());
+  return db.prepare("SELECT * FROM reminders WHERE id=?").get(info.lastInsertRowid);
+}
+function dueReminders(now = Date.now()) {
+  return db.prepare("SELECT * FROM reminders WHERE due_at<=? ORDER BY due_at").all(now);
+}
+function deleteReminder(id) {
+  db.prepare("DELETE FROM reminders WHERE id=?").run(id);
+}
+function userReminders(g, u) {
+  ensureGuild(g);
+  return db
+    .prepare(
+      "SELECT * FROM reminders WHERE guild_id=? AND user_id=? ORDER BY due_at",
+    )
+    .all(g, u);
+}
+function listTicketPanels(guildId) {
+  ensureGuild(guildId);
+  return db
+    .prepare(
+      "SELECT panel, tag_name, enabled FROM ticket_panels WHERE guild_id=? ORDER BY panel",
+    )
+    .all(guildId);
 }
 function settings(guildId) {
   if (!isAllowedGuild(guildId)) return {};
@@ -1062,4 +1094,12 @@ module.exports = {
   getEmbedWebhook,
   setEmbedWebhook,
   deleteEmbedWebhook,
+  listTicketPanels,
+  addReminder,
+  dueReminders,
+  deleteReminder,
+  userReminders,
+  saveTicket,
+  ticket,
+  assignTicket,
 };

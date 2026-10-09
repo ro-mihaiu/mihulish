@@ -1,8 +1,15 @@
 {
   "date": "2026-10-09",
-  "version": "v1.15.1",
+  "version": "v1.15.2",
   "changes": [
-    "Added `/wiki article:<keyword>` (and `m.wiki article <keyword>`) — searches the TheySix wiki and minecraft.wiki in one go. The TheySix wiki article list comes from its sitemap (cached for an hour) and each result shows the real article title and description; minecraft.wiki results come from its search API. TheySix results are listed first, and one wiki being unreachable never blocks the other.",
-    "Added `/vd link:<link>` (and `m.vd <link>`) — same as `/dn` but finds the farm by its video link, for when people only have the YouTube URL and can't find the DN. It matches the exact stored link, the YouTube video ID (so `youtu.be` links find farms stored as `watch?v=` and vice versa), or a partial link, and reuses the whole `/dn` delivery: same embed and buttons, same 2-minute cooldown, DMs by default with the `send` option for posting in the channel."
+    "Added a full ticket system (ported from Drako Bot): `/panel` posts a ticket panel with an open button per ticket type (java, br, bug, report, partnership); opening a ticket creates a private `panel-username` channel under the support category visible only to the opener, staff and managers, with one open ticket per user per type.",
+    "Tickets can be closed with the 🔒 button in the channel or `/close` (staff). Closing renames the channel to `closed-…` (which the existing detector already understands) and staff get 🔓 reopen and 🗑️ delete buttons. Deleting saves a transcript and removes the channel after 5 seconds.",
+    "Ticket transcripts are generated as a styled HTML file — full message history with authors, avatars, timestamps, attachment links and embed summaries — and posted to the configured log channel whenever a ticket is closed or deleted. No new dependencies.",
+    "Added `/purge count:<1-100> user:<optional>` for staff with Manage Messages: bulk deletes recent messages (optionally from one member only), logs the purge, and auto-deletes its own confirmation after 5 seconds. Messages older than 14 days are skipped, as Discord requires.",
+    "Added `/snipe` — shows the most recently deleted message in the current channel (author, content, attachments, deletion time, kept for 6 hours). Staff only.",
+    "Added `/addrole user:<member> role:<role>` and `/removerole` — quick role management with logging and role-hierarchy safety checks.",
+    "Added `/poll question:<text> options:<comma-separated> duration:<optional>` — creates a numbered button-vote poll; with a duration (`10m`, `2h`, `3d`) the results are posted automatically when it ends, winner marked with 🏆. One vote per person.",
+    "Added `/remind in:<90s|10m|2h|3d> text:<what>` — personal reminders stored in the database, so they survive bot restarts, delivered in the channel they were set in.",
+    "The `/help` command now lists all the new commands in their categories."
   ]
 }

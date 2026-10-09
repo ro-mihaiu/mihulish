@@ -14,6 +14,7 @@ const fs = require("fs");
 const path = require("path");
 const { AttachmentBuilder } = require("discord.js");
 const store = require("./database");
+const { runPanelCommand, runCloseCommand } = require("./tickets");
 const { makeEmbed, logCommand, logEvent, logModeration, sendDM, fetchVideoTitle, resolveThumbnail, searchWikis } = require("./utils");
 const COLOR = 0xe91e63;
 const DOCS = "https://mihulish.ro-mihaiu.xyz";
@@ -230,6 +231,10 @@ function buildHelpEmbed(prefix = "m.") {
         { name: "unban", desc: "Unban a user from the server" },
         { name: "softban", desc: "Softban a member (ban and prune messages)" },
         { name: "bans", desc: "List active server bans" },
+        { name: "purge", desc: "Bulk delete recent messages in a channel" },
+        { name: "snipe", desc: "Show the last deleted message in a channel" },
+        { name: "addrole", desc: "Add a role to a member" },
+        { name: "removerole", desc: "Remove a role from a member" },
       ],
     },
     {
@@ -248,6 +253,8 @@ function buildHelpEmbed(prefix = "m.") {
         { name: "transfer", desc: "Transfer ticket to another staff member" },
         { name: "unclaim", desc: "Release claim on the current ticket" },
         { name: "ticket", desc: "Ping ticket owners whose tickets have no staff reply" },
+        { name: "panel", desc: "Post the ticket panel so users can open tickets" },
+        { name: "close", desc: "Close the current ticket and save a transcript" },
       ],
     },
     {
@@ -259,6 +266,8 @@ function buildHelpEmbed(prefix = "m.") {
         { name: "settings", desc: "View or configure server roles, channels, and prefix" },
         { name: "link", desc: "Set an appeal link" },
         { name: "sticky", desc: "Manage a sticky message in a channel" },
+        { name: "poll", desc: "Create a button-vote poll with optional timer" },
+        { name: "remind", desc: "Set a personal reminder that survives restarts" },
         { name: "embed", desc: "Create and manage saved embed messages" },
         { name: "invite", desc: "Get the bot invite link" },
       ],
@@ -1333,6 +1342,264 @@ add(ticketCmd, "Tickets", "Staff", async (i) => {
     ephemeral: true,
   });
 });
+
+const panelCmd = new SlashCommandBuilder()
+  .setName("panel")
+  .setDescription("Post the ticket panel so users can open tickets");
+add(panelCmd, "Tickets", "Manager", async (i) => {
+  if (!manager(i)) return deny(i, "Only managers can post the ticket panel.");
+  return runPanelCommand(i);
+});
+
+const closeCmd = new SlashCommandBuilder()
+  .setName("close")
+  .setDescription("Close the current ticket and save a transcript");
+add(closeCmd, "Tickets", "Staff", async (i) => {
+  return runCloseCommand(i);
+});
+
+// ---------------- Ported from Drako Bot: /purge, /snipe, /addrole,
+// /removerole, /poll, /remind ----------------
+
+const snipes = new Map(); // channelId -> { content, authorTag, avatar, at, attachments }
+function captureSnipe(message) {
+  if (!message.guild || message.author.bot) return;
+  snipes.set(message.channelId, {
+    content: message.content,
+    authorTag: message.author.tag,
+    avatar: message.author.displayAvatarURL({ size: 64 }),
+    at: Date.now(),
+    attachments: [...message.attachments.values()].map((a) => a.url),
+  });
+  // Keep the map bounded; only the latest snipe per channel matters.
+  if (snipes.size > 500) {
+    const first = snipes.keys().next().value;
+    snipes.delete(first);
+  }
+}
+function parseDuration(text) {
+  if (!text) return null;
+  const m = text.match(/^(\d+)\s*(s|sec|secs|seconds|m|min|mins|minutes|h|hr|hrs|hours|d|days?)$/i);
+  if (!m) return null;
+  const n = Number(m[1]);
+  const unit = m[2][0].toLowerCase();
+  const mult = { s: 1000, m: 60000, h: 3600000, d: 86400000 }[unit];
+  return n * mult;
+}
+
+const purgeCmd = new SlashCommandBuilder()
+  .setName("purge")
+  .setDescription("Bulk delete recent messages in this channel")
+  .setDefaultMemberPermissions(PermissionFlagsBits.ManageMessages)
+  .addIntegerOption((o) =>
+    o
+      .setName("count")
+      .setDescription("How many messages to delete (1-100)")
+      .setMinValue(1)
+      .setMaxValue(100)
+      .setRequired(true),
+  )
+  .addUserOption((o) =>
+    o.setName("user").setDescription("Only delete messages from this member"),
+  );
+add(purgeCmd, "Moderation", "Manage Messages", async (i) => {
+  if (!i.memberPermissions.has(PermissionFlagsBits.ManageMessages) && !isBotOwner(i.user.id, i.client))
+    return deny(i, "You need Manage Messages.");
+  const count = i.options.getInteger("count", true);
+  const user = i.options.getUser("user");
+  await i.deferReply({ flags: 64 });
+  let fetched = await i.channel.messages.fetch({ limit: 100 });
+  if (user) fetched = fetched.filter((m) => m.author.id === user.id);
+  const deletable = [...fetched.values()]
+    .filter((m) => Date.now() - m.createdTimestamp < 14 * 24 * 3600 * 1000)
+    .slice(0, count);
+  if (!deletable.length)
+    return i.editReply({ content: "No deletable messages found (messages older than 14 days cannot be bulk deleted)." });
+  await i.channel.bulkDelete(deletable, true).catch(() => {});
+  logModeration(i.guildId, i.client, {
+    action: "purge",
+    targetId: user?.id || null,
+    moderatorId: i.user.id,
+    reason: `${deletable.length} message(s) in <#${i.channelId}>`,
+  });
+  await i.editReply({ content: `Deleted **${deletable.length}** message(s)${user ? ` from <@${user.id}>` : ""}. This notice disappears in 5 seconds.` });
+  setTimeout(() => i.deleteReply().catch(() => {}), 5000);
+});
+
+const snipeCmd = new SlashCommandBuilder()
+  .setName("snipe")
+  .setDescription("Show the most recently deleted message in this channel");
+add(snipeCmd, "Moderation", "Staff", async (i) => {
+  if (!staff(i)) return deny(i);
+  const s = snipes.get(i.channelId);
+  if (!s || Date.now() - s.at > 6 * 3600 * 1000) {
+    snipes.delete(i.channelId);
+    return deny(i, "No recently deleted message in this channel.");
+  }
+  const e = embed("Sniped message", s.content || "*(no text)*");
+  e.setAuthor({ name: s.authorTag, iconURL: s.avatar });
+  e.setFooter({ text: `Deleted ${stamp(s.at)}${s.attachments.length ? ` · ${s.attachments.length} attachment(s)` : ""}` });
+  return respond(i, { components: [e], ephemeral: true });
+});
+
+const addroleCmd = new SlashCommandBuilder()
+  .setName("addrole")
+  .setDescription("Add a role to a member")
+  .setDefaultMemberPermissions(PermissionFlagsBits.ManageRoles)
+  .addUserOption((o) => o.setName("user").setDescription("Member").setRequired(true))
+  .addRoleOption((o) => o.setName("role").setDescription("Role to add").setRequired(true));
+add(addroleCmd, "Moderation", "Manage Roles", async (i) => {
+  if (!i.memberPermissions.has(PermissionFlagsBits.ManageRoles) && !isBotOwner(i.user.id, i.client))
+    return deny(i, "You need Manage Roles.");
+  const m = target(i),
+    role = i.options.getRole("role", true);
+  if (role.position >= i.guild.members.me.roles.highest.position)
+    return deny(i, "That role is above my highest role.");
+  await m.roles.add(role, `Added by ${i.user.tag}`).catch((e) => deny(i, `Failed: ${e.message}`));
+  logModeration(i.guildId, i.client, {
+    action: "addrole",
+    targetId: m.id,
+    moderatorId: i.user.id,
+    reason: role.name,
+  });
+  return respond(i, { components: [embed("Role added", `${m} now has **${role.name}**.`)] });
+});
+
+const removeroleCmd = new SlashCommandBuilder()
+  .setName("removerole")
+  .setDescription("Remove a role from a member")
+  .setDefaultMemberPermissions(PermissionFlagsBits.ManageRoles)
+  .addUserOption((o) => o.setName("user").setDescription("Member").setRequired(true))
+  .addRoleOption((o) => o.setName("role").setDescription("Role to remove").setRequired(true));
+add(removeroleCmd, "Moderation", "Manage Roles", async (i) => {
+  if (!i.memberPermissions.has(PermissionFlagsBits.ManageRoles) && !isBotOwner(i.user.id, i.client))
+    return deny(i, "You need Manage Roles.");
+  const m = target(i),
+    role = i.options.getRole("role", true);
+  if (role.position >= i.guild.members.me.roles.highest.position)
+    return deny(i, "That role is above my highest role.");
+  await m.roles.remove(role, `Removed by ${i.user.tag}`).catch((e) => deny(i, `Failed: ${e.message}`));
+  logModeration(i.guildId, i.client, {
+    action: "removerole",
+    targetId: m.id,
+    moderatorId: i.user.id,
+    reason: role.name,
+  });
+  return respond(i, { components: [embed("Role removed", `${m} no longer has **${role.name}**.`)] });
+});
+
+const pollCmd = new SlashCommandBuilder()
+  .setName("poll")
+  .setDescription("Create a reaction poll")
+  .addStringOption((o) => o.setName("question").setDescription("Poll question").setRequired(true).setMaxLength(256))
+  .addStringOption((o) => o.setName("options").setDescription("Comma-separated options, 2-10").setRequired(true).setMaxLength(1000))
+  .addStringOption((o) => o.setName("duration").setDescription("How long the poll runs, e.g. 10m, 2h, 3d (default: no end)").setMaxLength(10));
+add(pollCmd, "Utility", "Staff", async (i) => {
+  if (!staff(i)) return deny(i);
+  const question = i.options.getString("question", true);
+  const options = i.options
+    .getString("options", true)
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean)
+    .slice(0, 10);
+  if (options.length < 2)
+    return deny(i, "Provide at least 2 poll options, comma-separated.");
+  const digits = ["1️⃣", "2️⃣", "3️⃣", "4️⃣", "5️⃣", "6️⃣", "7️⃣", "8️⃣", "9️⃣", "🔟"];
+  const e = embed(`📊 ${question}`, options.map((opt, n) => `${digits[n]} ${opt}`).join("\n"));
+  const duration = parseDuration(i.options.getString("duration"));
+  const row = new ActionRowBuilder().addComponents(
+    ...options.map((_, n) => new ButtonBuilder().setCustomId(`poll_vote|${n}`).setLabel("Vote").setEmoji(digits[n]).setStyle(ButtonStyle.Secondary)),
+  );
+  const msg = await i.channel.send({ embeds: [e], components: [row] });
+  if (duration) {
+    const endsAt = Date.now() + duration;
+    e.setFooter({ text: `Poll ends ${stamp(endsAt)}` });
+    await msg.edit({ embeds: [e] }).catch(() => {});
+    polls.set(msg.id, { question, options, channelId: i.channelId, guildId: i.guildId, endsAt, votes: new Map() });
+  } else {
+    polls.set(msg.id, { question, options, channelId: i.channelId, guildId: i.guildId, endsAt: null, votes: new Map() });
+  }
+  return respond(i, {
+    components: [embed("Poll created", `Your poll is live above. Users click the numbered buttons to vote${duration ? "; results are posted when it ends." : "."}`)],
+    ephemeral: true,
+  });
+});
+
+// In-memory poll state. Small scale (one guild), so memory is fine; ended polls
+// are pruned after their results are posted.
+const polls = new Map();
+async function handlePollVote(interaction) {
+  const parts = interaction.customId.split("|");
+  if (parts[0] !== "poll_vote" || !parts[1]) return false;
+  const poll = polls.get(interaction.message.id);
+  if (!poll) return notice(interaction, "This poll has ended or is no longer being counted.");
+  const choice = Number(parts[1]);
+  if (poll.votes.has(interaction.user.id))
+    return notice(interaction, "You already voted in this poll.");
+  poll.votes.set(interaction.user.id, choice);
+  await notice(interaction, `Vote counted: **${poll.options[choice]}**.`);
+  return true;
+}
+function notice(interaction, text) {
+  const payload = { content: text, ephemeral: true };
+  if (interaction.deferred) return interaction.editReply(payload);
+  if (interaction.replied) return interaction.followUp(payload);
+  return interaction.reply(payload);
+}
+// Sweep ended polls; called from index.js on a timer alongside the reminders.
+async function finishEndedPolls(client) {
+  const now = Date.now();
+  for (const [msgId, poll] of polls) {
+    if (!poll.endsAt || poll.endsAt > now) continue;
+    polls.delete(msgId);
+    try {
+      const channel = await client.channels.fetch(poll.channelId);
+      const msg = await channel.messages.fetch(msgId);
+      const counts = poll.options.map((_, n) => poll.votes.size ? [...poll.votes.values()].filter((v) => v === n).length : 0);
+      const winner = Math.max(...counts);
+      const e = embed(`📊 Results: ${poll.question}`, poll.options
+        .map((opt, n) => `${counts[n] === winner && winner > 0 ? "🏆" : "▫️"} **${opt}** — ${counts[n]} vote(s)`)
+        .join("\n"));
+      e.setFooter({ text: `${poll.votes.size} total vote(s)` });
+      await msg.edit({ embeds: [e], components: [] });
+    } catch (err) {
+      console.error("[poll-finish]", err.message);
+    }
+  }
+}
+
+const remindCmd = new SlashCommandBuilder()
+  .setName("remind")
+  .setDescription("Set a reminder — survives bot restarts")
+  .addStringOption((o) => o.setName("in").setDescription("When to remind you, e.g. 90s, 10m, 2h, 3d").setRequired(true).setMaxLength(10))
+  .addStringOption((o) => o.setName("text").setDescription("What to remind you about").setRequired(true).setMaxLength(500));
+add(remindCmd, "Utility", "Everyone", async (i) => {
+  const ms = parseDuration(i.options.getString("in", true));
+  if (!ms || ms < 5000 || ms > 30 * 86400000)
+    return deny(i, "Use a duration like `90s`, `10m`, `2h` or `3d` (5 seconds to 30 days).");
+  const r = store.addReminder(i.guildId, i.user.id, i.channelId, i.options.getString("text", true), Date.now() + ms);
+  return respond(i, {
+    components: [embed("Reminder set", `I'll remind you here <t:${Math.floor(r.due_at / 1000)}:R>:
+> ${r.content}`)],
+    ephemeral: true,
+  });
+});
+// Deliver due reminders; called from index.js on a timer.
+async function deliverDueReminders(client) {
+  for (const r of store.dueReminders()) {
+    store.deleteReminder(r.id);
+    try {
+      const channel = await client.channels.fetch(r.channel_id);
+      const e = embed("⏰ Reminder", `<@${r.user_id}> you asked to be reminded:
+> ${r.content}`);
+      e.setFooter({ text: `Set ${stamp(r.created_at)}` });
+      await channel.send({ content: `<@${r.user_id}>`, embeds: [e], allowedMentions: { users: [r.user_id] } });
+    } catch (err) {
+      console.error("[reminder-deliver]", err.message);
+    }
+  }
+}
 
 const sticky = new SlashCommandBuilder()
   .setName("sticky")
@@ -2921,4 +3188,10 @@ module.exports = {
   embedManageGate,
   embedResultEmbed,
   EMBED_MAX_CONTENT,
+  runPanelCommand,
+  runCloseCommand,
+  captureSnipe,
+  handlePollVote,
+  finishEndedPolls,
+  deliverDueReminders,
 };
