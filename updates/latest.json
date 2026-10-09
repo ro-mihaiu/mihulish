@@ -1,12 +1,8 @@
 {
-  "date": "2026-10-03",
-  "version": "v1.15.0",
+  "date": "2026-10-09",
+  "version": "v1.15.1",
   "changes": [
-    "Fixed farm detection in the channels set with `/channels` — the video, world and schematic channels were configured but nothing was ever recognised, because the old detector only matched the exact `📪 DN: 123` form and only staged suggestions instead of registering farms.",
-    "Farm detection now reads the DN from every form people actually use (`DN: 445`, `DN : 445`, `DN=B100`, `dn 100`, `📪 DN : B105`, and a bare `B105` in the message), ignoring anything inside links, dates or times.",
-    "A new video post in the video channel now creates the farm straight away, and a world or schematic post updates the matching farm. When a link disagrees with a farm that already has one, nothing is overwritten: it is logged as a conflict and staged for a manager, exactly as before.",
-    "Farm detection now reports which bot messages it ignored and which bot ID to add to `FARM_RELAY_BOT_IDS`, instead of silently skipping them.",
-    "Added `/ticket ping:<hours>` (and `m.ticket ping <hours>`) for staff: finds every open ticket whose newest staff reply is older than the given number of hours and pings the ticket owner plus the staff member who last replied, with a summary of what was pinged.",
-    "The automatic 24-hour ticket sweep now uses the same detection as `/ticket ping`, so it waits for a *staff* reply rather than any message, and both report skipped tickets instead of ignoring them."
+    "Added `/wiki article:<keyword>` (and `m.wiki article <keyword>`) — searches the TheySix wiki and minecraft.wiki in one go. The TheySix wiki article list comes from its sitemap (cached for an hour) and each result shows the real article title and description; minecraft.wiki results come from its search API. TheySix results are listed first, and one wiki being unreachable never blocks the other.",
+    "Added `/vd link:<link>` (and `m.vd <link>`) — same as `/dn` but finds the farm by its video link, for when people only have the YouTube URL and can't find the DN. It matches the exact stored link, the YouTube video ID (so `youtu.be` links find farms stored as `watch?v=` and vice versa), or a partial link, and reuses the whole `/dn` delivery: same embed and buttons, same 2-minute cooldown, DMs by default with the `send` option for posting in the channel."
   ]
 }
