@@ -254,7 +254,8 @@ async function searchTheySixWiki(query, limit = 3) {
   return Promise.all(
     hits.map(async (h) => {
       const { title, description } = await fetchWikiMeta(h.url);
-      return { source: "TheySix Wiki", title, url: h.url, description };
+      const displayUrl = h.url.replace("//theysix.ro-mihaiu.xyz/", "//wiki-theysix.ro-mihaiu.xyz/");
+      return { source: "TheySix Wiki", title, url: displayUrl, description };
     }),
   );
 }
