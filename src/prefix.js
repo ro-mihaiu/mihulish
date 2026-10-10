@@ -199,7 +199,7 @@ async function handlePrefixMessage(message) {
       components: [
         embed(
           "Guild settings",
-          `Mute role: ${s.mute_role_id ? `<@&${s.mute_role_id}>` : "not set"}\nSupport category: ${s.support_category_id ? `<#${s.support_category_id}>` : "not set"}\nManager role: ${s.manager_role_id ? `<@&${s.manager_role_id}>` : "not set"}\nLog channel: ${s.log_channel_id ? `<#${s.log_channel_id}>` : "not set"}\nPrefix: ${s.prefix || "m."}\nAppeal link: ${s.appeal_link || "not set"}`,
+          `Mute role: ${s.mute_role_id ? `<@&${s.mute_role_id}>` : "not set"}\nSupport category: ${s.support_category_id ? `<#${s.support_category_id}>` : "not set"}\nManager role: ${s.manager_role_id ? `<@&${s.manager_role_id}>` : "not set"}\nLog channel: ${s.log_channel_id ? `<#${s.log_channel_id}>` : "not set"}\nTicket transcript channel: ${s.ticket_transcript_channel_id ? `<#${s.ticket_transcript_channel_id}>` : "not set"}\nPrefix: ${s.prefix || "m."}\nAppeal link: ${s.appeal_link || "not set"}`,
         ),
       ],
       });
@@ -221,7 +221,7 @@ async function handlePrefixMessage(message) {
         components: [
           embed(
             "Settings updated",
-            `Mute role: ${s.mute_role_id ? `<@&${s.mute_role_id}>` : "not set"}\nSupport category: ${s.support_category_id ? `<#${s.support_category_id}>` : "not set"}\nManager role: ${s.manager_role_id ? `<@&${s.manager_role_id}>` : "not set"}\nLog channel: ${s.log_channel_id ? `<#${s.log_channel_id}>` : "not set"}\nPrefix: ${s.prefix || "m."}\nAppeal link: ${s.appeal_link || "not set"}`,
+            `Mute role: ${s.mute_role_id ? `<@&${s.mute_role_id}>` : "not set"}\nSupport category: ${s.support_category_id ? `<#${s.support_category_id}>` : "not set"}\nManager role: ${s.manager_role_id ? `<@&${s.manager_role_id}>` : "not set"}\nLog channel: ${s.log_channel_id ? `<#${s.log_channel_id}>` : "not set"}\nTicket transcript channel: ${s.ticket_transcript_channel_id ? `<#${s.ticket_transcript_channel_id}>` : "not set"}\nPrefix: ${s.prefix || "m."}\nAppeal link: ${s.appeal_link || "not set"}`,
           ),
         ],
       });
@@ -271,9 +271,20 @@ async function handlePrefixMessage(message) {
       });
     }
 
+    if (lowerKey === "ticket_transcripts" || lowerKey === "ticket_transcript_channel") {
+      const channel = val === "none" || val === "reset" ? null : resolveChannel(message.guild, val);
+      if (val !== "none" && val !== "reset" && !channel) {
+        return reply(message, `Channel not found. Usage: \`${p}settings ticket_transcripts <#channel|none>\``);
+      }
+      const s = store.updateSettings(message.guild.id, { ticket_transcript_channel_id: channel ? channel.id : null });
+      return reply(message, {
+        components: [embed("Settings updated", `Ticket transcript channel set to: ${channel ? `<#${channel.id}>` : "not set"}`)],
+      });
+    }
+
     return reply(
       message,
-      `Unknown setting key \`${key}\`. Valid keys: \`prefix\`, \`mute_role\`, \`manager_role\`, \`support_category\`, \`log_channel\`.`,
+      `Unknown setting key \`${key}\`. Valid keys: \`prefix\`, \`mute_role\`, \`manager_role\`, \`support_category\`, \`log_channel\`, \`ticket_transcripts\`.`,
     );
   }
 

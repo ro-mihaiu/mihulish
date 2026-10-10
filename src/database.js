@@ -140,8 +140,20 @@ try {
 } catch (error) {
   if (!error.message.includes("duplicate column name")) throw error;
 }
+// 1-5 star rating the ticket creator gives when they receive the transcript DM.
+try {
+  db.exec("ALTER TABLE tickets ADD COLUMN rating INTEGER");
+} catch (error) {
+  if (!error.message.includes("duplicate column name")) throw error;
+}
 try {
   db.exec("ALTER TABLE guild_settings ADD COLUMN dn_link_style TEXT");
+} catch (error) {
+  if (!error.message.includes("duplicate column name")) throw error;
+}
+// Dedicated channel for ticket transcripts and user ratings.
+try {
+  db.exec("ALTER TABLE guild_settings ADD COLUMN ticket_transcript_channel_id TEXT");
 } catch (error) {
   if (!error.message.includes("duplicate column name")) throw error;
 }
@@ -252,6 +264,7 @@ function updateSettings(guildId, values) {
     "support_category_id",
     "manager_role_id",
     "log_channel_id",
+    "ticket_transcript_channel_id",
     "prefix",
     "appeal_link",
     "dn_link_style",
@@ -461,6 +474,14 @@ function listOpenTickets(g) {
 }
 function deleteTicket(g, c) {
   db.prepare("DELETE FROM tickets WHERE guild_id=? AND channel_id=?").run(g, c);
+}
+// Stores the creator's 1-5 star rating for a closed ticket.
+function saveTicketRating(g, c, userId, stars) {
+  if (!g || !c) return null;
+  db.prepare(
+    "UPDATE tickets SET rating=? WHERE guild_id=? AND channel_id=? AND ticket_user_id=?",
+  ).run(stars, g, c, userId);
+  return ticket(g, c);
 }
 function addStaffTag(g, name, u, by) {
   if (!isAllowedGuild(g)) return;
@@ -1240,4 +1261,5 @@ module.exports = {
   saveTicket,
   ticket,
   assignTicket,
+  saveTicketRating,
 };

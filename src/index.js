@@ -304,7 +304,7 @@ function buttonNotice(i, content, useEphemeral = true) {
 // than the interaction, and the link itself is a followUp because `update()` has
 // already acknowledged the interaction by the time we answer.
 client.on(Events.InteractionCreate, async (i) => {
-  if (!i.isButton()) return;
+  if (!i.isButton() && !i.isModalSubmit() && !i.isStringSelectMenu()) return;
   if (
     await handleTicketInteraction(i).catch((e) => {
       console.error("[tickets]", e.message);

@@ -1144,8 +1144,12 @@ add(claim, "Tickets", "Staff", async (i) => {
   const t = store.ticket(i.guildId, i.channelId);
   if (!t || t.status !== "OPEN" || !t.ticket_user_id)
     return deny(i, "This is not a recognized open ticket.");
+  if (t.assigned_staff_id === i.user.id)
+    return deny(i, "You have already claimed this ticket.");
+  if (t.assigned_staff_id)
+    return deny(i, `This ticket is already claimed by <@${t.assigned_staff_id}>. A manager can transfer it.`);
   store.assignTicket(i.guildId, i.channelId, i.user.id);
-  sendDM(i.user.id, i.client, "Ticket Assigned", `You claimed ticket **${t.panel}** in **${i.guild.name}**.`).catch(() => {});
+  sendDM(i.user.id, i.client, "Ticket Assigned", `You claimed ticket **${t.panel}** in **${i.guild.name}**: <#${i.channelId}>`).catch(() => {});
   return respond(i, {
     content: `<@${t.ticket_user_id}> <@${i.user.id}> has claimed this ticket.`,
     allowedMentions: { users: [t.ticket_user_id, i.user.id] },
@@ -1165,11 +1169,16 @@ add(transfer, "Tickets", "Staff", async (i) => {
     return deny(i, "This is not a recognized open ticket.");
   if (!store.isStaff(i.guildId, u.id))
     return deny(i, "The recipient must be registered staff.");
+  if (u.id === t.assigned_staff_id)
+    return deny(i, `<@${u.id}> already owns this ticket.`);
+  const previous = t.assigned_staff_id;
   store.assignTicket(i.guildId, i.channelId, u.id);
-  sendDM(u.id, i.client, "Ticket Transferred", `You received ticket **${t.panel}** in **${i.guild.name}** from <@${i.user.id}>.`).catch(() => {});
+  sendDM(u.id, i.client, "Ticket Transferred", `You received ticket **${t.panel}** in **${i.guild.name}**: <#${i.channelId}> (from <@${i.user.id}>).`).catch(() => {});
   return respond(i, {
-    content: `<@${t.ticket_user_id}> <@${u.id}> has received this ticket from <@${i.user.id}>.`,
-    allowedMentions: { users: [t.ticket_user_id, u.id, i.user.id] },
+    content:
+      `<@${t.ticket_user_id}> <@${u.id}> has received this ticket from <@${i.user.id}>.` +
+      (previous ? ` (Previously claimed by <@${previous}>.)` : ""),
+    allowedMentions: { users: [t.ticket_user_id, u.id, i.user.id, previous].filter(Boolean) },
   });
 });
 const unclaim = new SlashCommandBuilder()
@@ -1779,6 +1788,9 @@ const settingsCmd = new SlashCommandBuilder()
   .addChannelOption((o) =>
     o.setName("log_channel").setDescription("Moderation log channel"),
   )
+  .addChannelOption((o) =>
+    o.setName("ticket_transcripts").setDescription("Channel where ticket transcripts and ratings are posted"),
+  )
   .addStringOption((o) =>
     o
       .setName("prefix")
@@ -1797,6 +1809,7 @@ add(settingsCmd, "Utility", "Administrator", async (i) => {
     support = i.options.getChannel("support_category"),
     managerRole = i.options.getRole("manager_role"),
     log = i.options.getChannel("log_channel"),
+    transcriptCh = i.options.getChannel("ticket_transcripts"),
     prefix = i.options.getString("prefix");
   if (muteRole) values.mute_role_id = muteRole.id;
   if (support) {
@@ -1806,6 +1819,7 @@ add(settingsCmd, "Utility", "Administrator", async (i) => {
   }
   if (managerRole) values.manager_role_id = managerRole.id;
   if (log) values.log_channel_id = log.id;
+  if (transcriptCh) values.ticket_transcript_channel_id = transcriptCh.id;
   if (prefix) {
     if (/\s/.test(prefix)) return deny(i, "The prefix cannot contain spaces.");
     values.prefix = prefix;
@@ -1816,7 +1830,7 @@ add(settingsCmd, "Utility", "Administrator", async (i) => {
       components: [
         embed(
           "Guild settings",
-          `Mute role: ${s.mute_role_id ? `<@&${s.mute_role_id}>` : "not set"}\nSupport category: ${s.support_category_id ? `<#${s.support_category_id}>` : "not set"}\nManager role: ${s.manager_role_id ? `<@&${s.manager_role_id}>` : "not set"}\nLog channel: ${s.log_channel_id ? `<#${s.log_channel_id}>` : "not set"}\nPrefix: ${s.prefix || "m."}\nAppeal link: ${s.appeal_link || "not set"}`,
+          `Mute role: ${s.mute_role_id ? `<@&${s.mute_role_id}>` : "not set"}\nSupport category: ${s.support_category_id ? `<#${s.support_category_id}>` : "not set"}\nManager role: ${s.manager_role_id ? `<@&${s.manager_role_id}>` : "not set"}\nLog channel: ${s.log_channel_id ? `<#${s.log_channel_id}>` : "not set"}\nTicket transcript channel: ${s.ticket_transcript_channel_id ? `<#${s.ticket_transcript_channel_id}>` : "not set"}\nPrefix: ${s.prefix || "m."}\nAppeal link: ${s.appeal_link || "not set"}`,
         ),
       ],
       ephemeral: true,
@@ -1827,7 +1841,7 @@ add(settingsCmd, "Utility", "Administrator", async (i) => {
       components: [
         embed(
           "Settings updated",
-          `Mute role: ${s.mute_role_id ? `<@&${s.mute_role_id}>` : "not set"}\nSupport category: ${s.support_category_id ? `<#${s.support_category_id}>` : "not set"}\nManager role: ${s.manager_role_id ? `<@&${s.manager_role_id}>` : "not set"}\nLog channel: ${s.log_channel_id ? `<#${s.log_channel_id}>` : "not set"}\nPrefix: ${s.prefix || "m."}\nAppeal link: ${s.appeal_link || "not set"}`,
+          `Mute role: ${s.mute_role_id ? `<@&${s.mute_role_id}>` : "not set"}\nSupport category: ${s.support_category_id ? `<#${s.support_category_id}>` : "not set"}\nManager role: ${s.manager_role_id ? `<@&${s.manager_role_id}>` : "not set"}\nLog channel: ${s.log_channel_id ? `<#${s.log_channel_id}>` : "not set"}\nTicket transcript channel: ${s.ticket_transcript_channel_id ? `<#${s.ticket_transcript_channel_id}>` : "not set"}\nPrefix: ${s.prefix || "m."}\nAppeal link: ${s.appeal_link || "not set"}`,
         ),
       ],
     });
