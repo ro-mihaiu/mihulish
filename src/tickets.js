@@ -262,9 +262,17 @@ function autoAssignStaff(guild, panel, answers) {
   return bestScore > 0 ? best : null;
 }
 
-// `/panel` — post a Components V2 panel: welcome text, one description block
-// per enabled panel, a Quick Select section with the wiki link button, and a
-// select menu that opens a question form for the chosen ticket type.
+// Panel metadata is keyed by panel name; `panelLabel` resolves the display
+// name for any panel (falls back to the raw panel key).
+function panelLabel(panel) {
+  const meta = PANEL_META[panel];
+  return meta ? meta.label : panel;
+}
+
+// `/panel` — post a Components V2 panel: a container with an accent color,
+// welcome text, one description block per enabled panel, a Quick Select
+// section with the wiki link button, and a select menu that opens a question
+// form for the chosen ticket type.
 function buildPanelPayload(panels) {
   const text = (content) => ({ type: 10, content });
   const divider = (spacing = 1) => ({ type: 14, divider: true, spacing });
@@ -313,7 +321,23 @@ function buildPanelPayload(panels) {
   );
   return {
     flags: MessageFlags.IsComponentsV2,
-    components: [welcome, divider(2), ...blocks, quickSelect, selectRow, divider(1), footer],
+    components: [
+      {
+        // Container (type 17) — the accent_color gives the panel its colored
+        // side bar / background like the TheySix changelog messages.
+        type: 17,
+        accent_color: 0xe91e63,
+        components: [
+          welcome,
+          divider(2),
+          ...blocks,
+          quickSelect,
+          selectRow,
+          divider(1),
+          footer,
+        ],
+      },
+    ],
   };
 }
 

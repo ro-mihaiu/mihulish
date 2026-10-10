@@ -140,6 +140,17 @@ try {
 } catch (error) {
   if (!error.message.includes("duplicate column name")) throw error;
 }
+// Seed the management panel for guilds created before it was added.
+try {
+  const rows = db.prepare("SELECT DISTINCT guild_id FROM ticket_panels").all();
+  for (const row of rows) {
+    db.prepare(
+      "INSERT OR IGNORE INTO ticket_panels (guild_id, panel, tag_name) VALUES (?, 'management', 'management')",
+    ).run(row.guild_id);
+  }
+} catch (error) {
+  console.error("[db] management panel migration:", error.message);
+}
 // 1-5 star rating the ticket creator gives when they receive the transcript DM.
 try {
   db.exec("ALTER TABLE tickets ADD COLUMN rating INTEGER");
@@ -171,7 +182,15 @@ try {
 db.exec("DROP TABLE IF EXISTS user_votes");
 db.exec("DROP TABLE IF EXISTS votes");
 
-const DEFAULT_TICKET_PANELS = ["java", "br", "bug", "report", "partnership"];
+const DEFAULT_TICKET_PANELS = ["java", "br", "bug", "report", "partnership", "management"];
+
+// Desired display order for panels: java, bedrock, report bug, report a
+// person, partnership, management. Anything unknown sorts last.
+const PANEL_ORDER = ["java", "br", "bug", "report", "partnership", "management"];
+function panelOrderIndex(panel) {
+  const i = PANEL_ORDER.indexOf(panel);
+  return i === -1 ? PANEL_ORDER.length : i;
+}
 
 // One-time farm seed for the allowed guild from farms_builds.jsonl.
 // Idempotent: existing farm rows (e.g. manager-curated links) are never overwritten.
@@ -245,9 +264,10 @@ function listTicketPanels(guildId) {
   ensureGuild(guildId);
   return db
     .prepare(
-      "SELECT panel, tag_name, enabled FROM ticket_panels WHERE guild_id=? ORDER BY panel",
+      "SELECT panel, tag_name, enabled FROM ticket_panels WHERE guild_id=?",
     )
-    .all(guildId);
+    .all(guildId)
+    .sort((a, b) => panelOrderIndex(a.panel) - panelOrderIndex(b.panel));
 }
 function settings(guildId) {
   if (!isAllowedGuild(guildId)) return {};
