@@ -89,8 +89,15 @@ function respond(i, payload) {
   if (payload && typeof payload.then === "function")
     return payload.then((resolved) => respond(i, resolved));
   const response = normalizeResponse(payload);
-  if (!response.content && !response.embeds?.length && !response.files?.length) {
-    // Never send an empty message — say something instead of 50006.
+  const isComponentsV2 = Boolean(response.flags & MessageFlags.IsComponentsV2);
+  if (
+    !isComponentsV2 &&
+    !response.content &&
+    !response.embeds?.length &&
+    !response.files?.length
+  ) {
+    // Never send an empty message — say something instead of 50006. (Components
+    // V2 payloads can't carry a content field at all, so they're exempt.)
     response.content = "Done.";
   }
   if (!i.deferred) return i.reply(response);
