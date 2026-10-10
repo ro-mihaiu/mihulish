@@ -902,10 +902,10 @@ async function handleTicketInteraction(interaction) {
   }
 
   // Modal submits from the required-question form — create the ticket with the
-  // answers filled into the welcome embed.
+  // answers filled into the welcome embed. createTicket() defers the
+  // interaction itself, so we don't defer here.
   if (interaction.isModalSubmit() && interaction.customId.startsWith(`${MODAL_CUSTOM_ID}|`)) {
     const panel = interaction.customId.slice(MODAL_CUSTOM_ID.length + 1);
-    await interaction.deferReply({ flags: 64 });
     const answers = [];
     for (let i = 0; i < 5; i++) {
       const v = interaction.fields.getTextInputValue(`q${i}`);
