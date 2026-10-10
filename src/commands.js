@@ -1185,7 +1185,7 @@ add(transfer, "Tickets", "Staff", async (i) => {
     content:
       `<@${t.ticket_user_id}> <@${u.id}> has received this ticket from <@${i.user.id}>.` +
       (previous ? ` (Previously claimed by <@${previous}>.)` : ""),
-    allowedMentions: { users: [t.ticket_user_id, u.id, i.user.id, previous].filter(Boolean) },
+    allowedMentions: { users: [...new Set([t.ticket_user_id, u.id, i.user.id, previous].filter(Boolean))] },
   });
 });
 const unclaim = new SlashCommandBuilder()

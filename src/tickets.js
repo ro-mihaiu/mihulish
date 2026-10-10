@@ -588,8 +588,9 @@ async function claimTicket(interaction) {
     embeds: [embed("Ticket claimed", `**${t.panel}** ticket <#${interaction.channelId}> claimed by <@${interaction.user.id}>`)],
   });
   const text = `<@${t.ticket_user_id}> <@${interaction.user.id}> has claimed this ticket.`;
-  if (interaction.deferred || interaction.replied) return interaction.editReply({ content: text, allowedMentions: { users: [t.ticket_user_id, interaction.user.id] } });
-  return interaction.reply({ content: text, allowedMentions: { users: [t.ticket_user_id, interaction.user.id] } });
+  const mentionIds = [...new Set([t.ticket_user_id, interaction.user.id].filter(Boolean))];
+  if (interaction.deferred || interaction.replied) return interaction.editReply({ content: text, allowedMentions: { users: mentionIds } });
+  return interaction.reply({ content: text, allowedMentions: { users: mentionIds } });
 }
 
 // ---------- close ----------
@@ -600,6 +601,14 @@ async function closeTicket(interaction, { viaCommand = false } = {}) {
   if (!t || t.status !== "OPEN") {
     const message = "This is not a recognized open ticket.";
     return viaCommand ? { error: message } : notice(interaction, message);
+  }
+  // Closing is a staff action; the ticket owner asks staff or uses the claim.
+  if (
+    !viaCommand &&
+    !store.isStaff(guild.id, interaction.user.id) &&
+    !interaction.memberPermissions?.has(PermissionFlagsBits.ManageChannels)
+  ) {
+    return notice(interaction, "Only staff can close a ticket.");
   }
   if (!viaCommand) await interaction.deferReply({ flags: 64 });
 
@@ -620,7 +629,9 @@ async function closeTicket(interaction, { viaCommand = false } = {}) {
     `Staff can reopen or delete it below.`,
   );
   reply.setFooter({ text: "Mihulish | Ticket System" });
-  await interaction.channel.send({ embeds: [reply], components: [ticketControls(true)] });
+  // No buttons on the closed notice — staff act through /close's reopen and
+  // /delete, or the controls on the original welcome message.
+  await interaction.channel.send({ embeds: [reply] });
 
   await logToChannel(guild, {
     embeds: [
@@ -662,8 +673,12 @@ async function deleteTicket(interaction) {
   const guild = interaction.guild;
   const t = ticketRowForChannel(guild.id, interaction.channelId);
   if (!t) return notice(interaction, "This is not a recognized ticket.");
-  if (!interaction.memberPermissions.has(PermissionFlagsBits.ManageChannels) && !store.isStaff(guild.id, interaction.user.id))
+  if (!interaction.memberPermissions?.has(PermissionFlagsBits.ManageChannels) && !store.isStaff(guild.id, interaction.user.id))
     return notice(interaction, "Only staff can delete a ticket.");
+  // Tickets must be closed before they can be deleted, so a transcript always
+  // exists first.
+  if (t.status !== "CLOSED")
+    return notice(interaction, "Close the ticket first — tickets can only be deleted once closed.");
 
   await interaction.deferReply({ flags: 64 });
 

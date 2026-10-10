@@ -13,6 +13,10 @@
     "Automatic staff assignment: when a ticket is created, Mihulish scores the answers (DN, video link, problem description) plus the ticket panel against expertise tags and keywords (java, bedrock, bug, report, partnership, management), prefers the least-loaded matching staff member, claims the ticket for them and DMs them.",
     "Improved claiming: tickets now have a 🙋 Claim ticket button that only staff can press; it locks once claimed (nobody else can claim — a manager must /transfer), and the panel message's button flips to its green 'Claimed' state. `/claim` and `/transfer` now reject double-claims with clear messages and mention the previous owner on transfers.",
     "Transcripts are now also posted to a dedicated ticket transcript channel set via `/settings ticket_transcripts:<#channel>` (slash command and `m.settings ticket_transcripts` prefix command), alongside the mod-log.",
-    "When a ticket is closed or deleted, the creator receives the transcript in their DMs together with a 1-5 ⭐ rating form; ratings are stored on the ticket row and logged to the transcript and log channels."
+    "When a ticket is closed or deleted, the creator receives the transcript in their DMs together with a 1-5 ⭐ rating form; ratings are stored on the ticket row and logged to the transcript and log channels.",
+    "The panel is wrapped in a Container component with the brand accent color, so it has the same colored background style as the TheySix changelog messages.",
+    "Panel and select-menu entries are now ordered: Java Farm, Bedrock Farm, Report a Bug, Report a Person, Partnership, Management. The management panel is also seeded for existing guilds, so it appears in the menu (it was missing).",
+    "Tickets must be closed before they can be deleted, guaranteeing a transcript always exists first; closing, reopening and deleting are staff-only actions, and the 'Ticket closed' notice no longer shows a duplicate button row.",
+    "Fixed /panel failing with 'MESSAGE_CANNOT_USE_LEGACY_FIELDS_WITH_COMPONENTS_V2' (the Components V2 payload no longer gets an automatic 'Done.' content field), a crash when opening a ticket modal, and /transfer failing when the users mentioned were the same."
   ]
 }
