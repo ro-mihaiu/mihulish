@@ -30,6 +30,11 @@ const REOPEN_CUSTOM_ID = "ticket_reopen";
 const DELETE_CUSTOM_ID = "ticket_delete";
 const CLAIM_CUSTOM_ID = "ticket_claim";
 
+// Tracks the panel message a user last interacted with, so the modal-submit
+// handler can reset the select menu after the form is filled in. A user can
+// only have one open modal at a time, so user_id is a sufficient key.
+const pendingPanelReset = new Map();
+
 // ---------- helpers ----------
 
 function escapeHtml(s) {
@@ -225,8 +230,10 @@ const AUTO_ASSIGN_RULES = [
 // problem description and the ticket panel all contribute. Staff with a
 // matching expertise tag are preferred, then the staff member with the least
 // currently-claimed tickets wins (simple round-robin between equals).
-function autoAssignStaff(guild, panel, answers) {
-  const staff = store.listStaff(guild.id).filter((s) => s.user_id);
+// The ticket creator is never considered — they are not staff and should not
+// be pinged or assigned.
+function autoAssignStaff(guild, panel, answers, excludeUserId = null) {
+  const staff = store.listStaff(guild.id).filter((s) => s.user_id && s.user_id !== excludeUserId);
   if (!staff.length) return null;
 
   const haystack = [
@@ -479,6 +486,26 @@ async function createTicket(interaction, panel, answers) {
       id: managerRoleId,
       allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory],
     });
+  // Role-based visibility per panel type: java/bedrock → any staff (via individual overwrites),
+  // bug → headmod+, report → mod+, partnership & management → manager+.
+  // Staff configured in the bot still see every ticket regardless of panel.
+  const s = store.settings(guild.id);
+  const roleVisibility = {
+    java: null,
+    br: null,
+    bug: s.headmod_role_id,
+    report: s.mod_role_id,
+    partnership: s.manager_role_id,
+    management: s.manager_role_id,
+  };
+  const panelRoleId = roleVisibility[panel];
+  if (panelRoleId) {
+    staffOverwrites.push({
+      id: panelRoleId,
+      allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory],
+      type: OverwriteType.Role,
+    });
+  }
 
   let channel;
   try {
@@ -496,11 +523,20 @@ async function createTicket(interaction, panel, answers) {
   }
 
   store.saveTicket(guild.id, channel.id, panel, interaction.user.id, "OPEN");
+  // Persist the answers so `/ticket staff helper` and the transcript can
+  // match expertise tags later.
+  store.saveTicketAnswers(
+    guild.id,
+    channel.id,
+    panel,
+    answers,
+    PANEL_QUESTIONS[panel] || [],
+  );
 
   // Auto-assign the ticket to the staff member whose expertise best matches
-  // the answers (DN, video link, problem description). Logged so staff know
-  // the ticket was routed automatically.
-  const autoAssigned = autoAssignStaff(guild, panel, answers);
+  // the answers (DN, video link, problem description). The ticket creator is
+  // never considered — they are not staff and should not be pinged.
+  const autoAssigned = autoAssignStaff(guild, panel, answers, interaction.user.id);
   if (autoAssigned) {
     store.assignTicket(guild.id, channel.id, autoAssigned);
     sendDM(
@@ -629,9 +665,21 @@ async function closeTicket(interaction, { viaCommand = false } = {}) {
     `Staff can reopen or delete it below.`,
   );
   reply.setFooter({ text: "Mihulish | Ticket System" });
-  // No buttons on the closed notice — staff act through /close's reopen and
-  // /delete, or the controls on the original welcome message.
-  await interaction.channel.send({ embeds: [reply] });
+  // Staff can reopen the ticket from this closed notice (the original welcome
+  // message's controls are also still available, but this gives staff a
+  // second entry point right next to the transcript).
+  await interaction.channel.send({
+    embeds: [reply],
+    components: [
+      new ActionRowBuilder().addComponents(
+        new ButtonBuilder()
+          .setCustomId(REOPEN_CUSTOM_ID)
+          .setLabel("Reopen ticket")
+          .setEmoji("🔓")
+          .setStyle(ButtonStyle.Success),
+      ),
+    ],
+  });
 
   await logToChannel(guild, {
     embeds: [
@@ -838,6 +886,9 @@ async function handleTicketInteraction(interaction) {
   // Select-menu picks on the Components V2 panel.
   if (interaction.isStringSelectMenu() && interaction.customId === PANEL_SELECT_CUSTOM_ID) {
     const panel = interaction.values[0];
+    // Remember which panel message this user picked from, so the modal
+    // submit handler can reset the select menu afterwards.
+    pendingPanelReset.set(interaction.user.id, interaction.message.id);
     await openTicket(interaction, panel).catch((e) =>
       console.error("[tickets] open:", e.message),
     );
@@ -858,6 +909,21 @@ async function handleTicketInteraction(interaction) {
       console.error("[tickets] open:", e.message);
       interaction.editReply({ content: `I could not create the ticket: ${e.message}` }).catch(() => {});
     });
+    // Reset the select menu on the original panel message so the user can
+    // pick again (e.g. re-select Java after filling the form).
+    const panelMsgId = pendingPanelReset.get(interaction.user.id);
+    pendingPanelReset.delete(interaction.user.id);
+    if (panelMsgId) {
+      try {
+        const panelMsg = await interaction.guild.messages.fetch(panelMsgId).catch(() => null);
+        if (panelMsg?.author?.id === interaction.client.user.id) {
+          const panels = store.listTicketPanels(interaction.guildId).filter((p) => p.enabled);
+          if (panels.some((p) => p.panel === panel)) {
+            await panelMsg.edit(buildPanelPayload(panels)).catch(() => {});
+          }
+        }
+      } catch {}
+    }
     return true;
   }
 
@@ -929,4 +995,6 @@ module.exports = {
   runPanelCommand,
   runCloseCommand,
   ticketControls,
+  PANEL_QUESTIONS,
+  AUTO_ASSIGN_RULES,
 };

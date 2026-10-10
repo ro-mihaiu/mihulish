@@ -199,7 +199,7 @@ async function handlePrefixMessage(message) {
       components: [
         embed(
           "Guild settings",
-          `Mute role: ${s.mute_role_id ? `<@&${s.mute_role_id}>` : "not set"}\nSupport category: ${s.support_category_id ? `<#${s.support_category_id}>` : "not set"}\nManager role: ${s.manager_role_id ? `<@&${s.manager_role_id}>` : "not set"}\nLog channel: ${s.log_channel_id ? `<#${s.log_channel_id}>` : "not set"}\nTicket transcript channel: ${s.ticket_transcript_channel_id ? `<#${s.ticket_transcript_channel_id}>` : "not set"}\nPrefix: ${s.prefix || "m."}\nAppeal link: ${s.appeal_link || "not set"}`,
+          `Mute role: ${s.mute_role_id ? `<@&${s.mute_role_id}>` : "not set"}\nSupport category: ${s.support_category_id ? `<#${s.support_category_id}>` : "not set"}\nManager role: ${s.manager_role_id ? `<@&${s.manager_role_id}>` : "not set"}\nMod role: ${s.mod_role_id ? `<@&${s.mod_role_id}>` : "not set"}\nHeadmod role: ${s.headmod_role_id ? `<@&${s.headmod_role_id}>` : "not set"}\nAdmin role: ${s.admin_role_id ? `<@&${s.admin_role_id}>` : "not set"}\nTheySix role: ${s.themsix_role_id ? `<@&${s.themsix_role_id}>` : "not set"}\nLog channel: ${s.log_channel_id ? `<#${s.log_channel_id}>` : "not set"}\nTicket transcript channel: ${s.ticket_transcript_channel_id ? `<#${s.ticket_transcript_channel_id}>` : "not set"}\nPrefix: ${s.prefix || "m."}\nAppeal link: ${s.appeal_link || "not set"}`,
         ),
       ],
       });
@@ -221,7 +221,7 @@ async function handlePrefixMessage(message) {
         components: [
           embed(
             "Settings updated",
-            `Mute role: ${s.mute_role_id ? `<@&${s.mute_role_id}>` : "not set"}\nSupport category: ${s.support_category_id ? `<#${s.support_category_id}>` : "not set"}\nManager role: ${s.manager_role_id ? `<@&${s.manager_role_id}>` : "not set"}\nLog channel: ${s.log_channel_id ? `<#${s.log_channel_id}>` : "not set"}\nTicket transcript channel: ${s.ticket_transcript_channel_id ? `<#${s.ticket_transcript_channel_id}>` : "not set"}\nPrefix: ${s.prefix || "m."}\nAppeal link: ${s.appeal_link || "not set"}`,
+            `Mute role: ${s.mute_role_id ? `<@&${s.mute_role_id}>` : "not set"}\nSupport category: ${s.support_category_id ? `<#${s.support_category_id}>` : "not set"}\nManager role: ${s.manager_role_id ? `<@&${s.manager_role_id}>` : "not set"}\nMod role: ${s.mod_role_id ? `<@&${s.mod_role_id}>` : "not set"}\nHeadmod role: ${s.headmod_role_id ? `<@&${s.headmod_role_id}>` : "not set"}\nAdmin role: ${s.admin_role_id ? `<@&${s.admin_role_id}>` : "not set"}\nTheySix role: ${s.themsix_role_id ? `<@&${s.themsix_role_id}>` : "not set"}\nLog channel: ${s.log_channel_id ? `<#${s.log_channel_id}>` : "not set"}\nTicket transcript channel: ${s.ticket_transcript_channel_id ? `<#${s.ticket_transcript_channel_id}>` : "not set"}\nPrefix: ${s.prefix || "m."}\nAppeal link: ${s.appeal_link || "not set"}`,
           ),
         ],
       });
@@ -246,6 +246,50 @@ async function handlePrefixMessage(message) {
       const s = store.updateSettings(message.guild.id, { manager_role_id: role ? role.id : null });
       return reply(message, {
         components: [embed("Settings updated", `Manager role set to: ${role ? `<@&${role.id}>` : "not set"}`)],
+      });
+    }
+
+    if (lowerKey === "mod_role") {
+      const role = val === "none" || val === "reset" ? null : resolveRole(message.guild, val);
+      if (val !== "none" && val !== "reset" && !role) {
+        return reply(message, `Role not found. Usage: \`${p}settings mod_role <@role|none>\``);
+      }
+      store.updateSettings(message.guild.id, { mod_role_id: role ? role.id : null });
+      return reply(message, {
+        components: [embed("Settings updated", `Mod role set to: ${role ? `<@&${role.id}>` : "not set"}`)],
+      });
+    }
+
+    if (lowerKey === "headmod_role") {
+      const role = val === "none" || val === "reset" ? null : resolveRole(message.guild, val);
+      if (val !== "none" && val !== "reset" && !role) {
+        return reply(message, `Role not found. Usage: \`${p}settings headmod_role <@role|none>\``);
+      }
+      store.updateSettings(message.guild.id, { headmod_role_id: role ? role.id : null });
+      return reply(message, {
+        components: [embed("Settings updated", `Headmod role set to: ${role ? `<@&${role.id}>` : "not set"}`)],
+      });
+    }
+
+    if (lowerKey === "admin_role") {
+      const role = val === "none" || val === "reset" ? null : resolveRole(message.guild, val);
+      if (val !== "none" && val !== "reset" && !role) {
+        return reply(message, `Role not found. Usage: \`${p}settings admin_role <@role|none>\``);
+      }
+      store.updateSettings(message.guild.id, { admin_role_id: role ? role.id : null });
+      return reply(message, {
+        components: [embed("Settings updated", `Admin role set to: ${role ? `<@&${role.id}>` : "not set"}`)],
+      });
+    }
+
+    if (lowerKey === "themsix_role") {
+      const role = val === "none" || val === "reset" ? null : resolveRole(message.guild, val);
+      if (val !== "none" && val !== "reset" && !role) {
+        return reply(message, `Role not found. Usage: \`${p}settings theysix_role <@role|none>\``);
+      }
+      store.updateSettings(message.guild.id, { theysix_role_id: role ? role.id : null });
+      return reply(message, {
+        components: [embed("Settings updated", `TheySix role set to: ${role ? `<@&${role.id}>` : "not set"}`)],
       });
     }
 
@@ -284,7 +328,7 @@ async function handlePrefixMessage(message) {
 
     return reply(
       message,
-      `Unknown setting key \`${key}\`. Valid keys: \`prefix\`, \`mute_role\`, \`manager_role\`, \`support_category\`, \`log_channel\`, \`ticket_transcripts\`.`,
+      `Unknown setting key \`${key}\`. Valid keys: \`prefix\`, \`mute_role\`, \`manager_role\`, \`mod_role\`, \`headmod_role\`, \`admin_role\`, \`themsix_role\`, \`support_category\`, \`log_channel\`, \`ticket_transcripts\`.`,
     );
   }
 

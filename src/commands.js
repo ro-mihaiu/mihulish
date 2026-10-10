@@ -14,7 +14,7 @@ const fs = require("fs");
 const path = require("path");
 const { AttachmentBuilder } = require("discord.js");
 const store = require("./database");
-const { runPanelCommand, runCloseCommand } = require("./tickets");
+const { runPanelCommand, runCloseCommand, PANEL_QUESTIONS, AUTO_ASSIGN_RULES } = require("./tickets");
 const { makeEmbed, logCommand, logEvent, logModeration, sendDM, fetchVideoTitle, resolveThumbnail, searchWikis } = require("./utils");
 const COLOR = 0xe91e63;
 const DOCS = "https://mihulish.ro-mihaiu.xyz";
@@ -1293,23 +1293,134 @@ async function pingStaleTickets(guild, hours, { limit = 25, markActive = true } 
 const ticketCmd = new SlashCommandBuilder()
   .setName("ticket")
   .setDescription("Ticket utilities")
-  .addStringOption((o) =>
-    o
+  .addSubcommand((s) =>
+    s
       .setName("ping")
       .setDescription("Ping tickets with no staff reply for this many hours, or toggle pings in the current ticket")
-      .setRequired(true)
-      .addChoices(
-        { name: "on — re-enable ticket pings", value: "on" },
-        { name: "off — stop pinging this ticket", value: "off" },
-        { name: "12h", value: "12" },
-        { name: "24h", value: "24" },
-        { name: "48h", value: "48" },
-        { name: "72h", value: "72" },
-        { name: "1 week", value: "168" },
+      .addStringOption((o) =>
+        o
+          .setName("hours")
+          .setDescription("Ping tickets with no staff reply for this many hours, or toggle pings in the current ticket")
+          .setRequired(true)
+          .addChoices(
+            { name: "on — re-enable ticket pings", value: "on" },
+            { name: "off — stop pinging this ticket", value: "off" },
+            { name: "12h", value: "12" },
+            { name: "24h", value: "24" },
+            { name: "48h", value: "48" },
+            { name: "72h", value: "72" },
+            { name: "1 week", value: "168" },
+          ),
+      ),
+  )
+  .addSubcommand((s) =>
+    s
+      .setName("staff helper")
+      .setDescription("Ping staff by role or expertise tags for the current ticket")
+      .addStringOption((o) =>
+        o
+          .setName("role")
+          .setDescription("Staff role to ping (helper, mod, headmod, admin, manager, theysix) or omit for tag-based matching")
+          .addChoices(
+            { name: "helper", value: "helper" },
+            { name: "mod", value: "mod" },
+            { name: "headmod", value: "headmod" },
+            { name: "admin", value: "admin" },
+            { name: "manager", value: "manager" },
+            { name: "theysix", value: "theysix" },
+          ),
       ),
   );
 add(ticketCmd, "Tickets", "Staff", async (i) => {
   if (!staff(i)) return deny(i);
+  const sub = i.options.getSubcommand();
+  if (sub === "staff helper") {
+    const t = store.ticket(i.guildId, i.channelId);
+    if (!t || t.status !== "OPEN" || !t.ticket_user_id)
+      return respond(i, {
+        content: "Run this inside an open ticket channel.",
+        ephemeral: true,
+      });
+
+    const roleOpt = i.options.getString("role");
+    const settings = store.settings(i.guildId);
+    const roleMap = {
+      helper: settings.helper_role_id,
+      mod: settings.mod_role_id,
+      headmod: settings.headmod_role_id,
+      admin: settings.admin_role_id,
+      manager: settings.manager_role_id,
+      theysix: settings.theysix_role_id,
+    };
+
+    let ids = [];
+
+    if (roleOpt) {
+      // Ping staff by role
+      const roleId = roleMap[roleOpt];
+      if (!roleId) {
+        return respond(i, {
+          content: `The **${roleOpt}** role is not configured in settings.`,
+          ephemeral: true,
+        });
+      }
+      const role = i.guild.roles.cache.get(roleId);
+      if (!role) {
+        return respond(i, {
+          content: `The **${roleOpt}** role no longer exists in this server.`,
+          ephemeral: true,
+        });
+      }
+      ids = role.members
+        .filter((m) => !m.user.bot && m.id !== t.ticket_user_id)
+        .map((m) => m.id);
+    } else {
+      // Tag-based matching (existing behavior)
+      const answers = store.ticketAnswers(i.guildId, t.channel_id);
+      const haystack = [
+        t.panel,
+        ...(answers || []).map((a) => String(a).toLowerCase()),
+      ].join("\n");
+      const matches = [];
+      for (const rule of AUTO_ASSIGN_RULES) {
+        const panelHit = rule.panels.includes(t.panel);
+        const keywordHit = rule.keywords.some((k) => haystack.includes(k));
+        if (!panelHit && !keywordHit) continue;
+        const tagged = store.tagMembers(i.guildId, rule.tag);
+        if (tagged.length) matches.push({ tag: rule.tag, members: tagged });
+      }
+      const seen = new Set();
+      for (const m of matches) {
+        for (const id of m.members) {
+          if (id === t.ticket_user_id) continue;
+          if (seen.has(id)) continue;
+          seen.add(id);
+          ids.push(id);
+        }
+      }
+    }
+
+    if (!ids.length)
+      return respond(i, {
+        content:
+          roleOpt
+            ? `No staff members with the **${roleOpt}** role found in this ticket.`
+            : "No staff members match this ticket's tags. Ping the general staff team instead.",
+        ephemeral: true,
+      });
+
+    const label = roleOpt
+      ? `**${roleOpt}** staff`
+      : matches
+          .map((m) => store.listTags(i.guildId).find((t) => t.name === m.tag)?.display_name || m.tag)
+          .join(", ");
+    return respond(i, {
+      content: `Staff helper for this ticket (${label}):\n${ids.map((id) => `<@${id}>`).join(" ")}`,
+      allowedMentions: { users: ids },
+    });
+  }
+
+  // ping subcommand — keep the existing behaviour.
   const raw = i.options.getString("ping", true);
 
   // `/ticket ping:<on/off>` toggles pings for the current ticket. Default is
@@ -1792,6 +1903,31 @@ const settingsCmd = new SlashCommandBuilder()
       .setName("manager_role")
       .setDescription("Role allowed to manage staff and settings"),
   )
+  .addRoleOption((o) =>
+    o
+      .setName("helper_role")
+      .setDescription("Helper staff role"),
+  )
+  .addRoleOption((o) =>
+    o
+      .setName("mod_role")
+      .setDescription("Role allowed to see Java/Bedrock tickets"),
+  )
+  .addRoleOption((o) =>
+    o
+      .setName("headmod_role")
+      .setDescription("Role allowed to see Bug report tickets"),
+  )
+  .addRoleOption((o) =>
+    o
+      .setName("admin_role")
+      .setDescription("Role allowed to see Report a Person tickets"),
+  )
+  .addRoleOption((o) =>
+    o
+      .setName("themsix_role")
+      .setDescription("Role allowed to see Partnership & Management tickets"),
+  )
   .addChannelOption((o) =>
     o.setName("log_channel").setDescription("Moderation log channel"),
   )
@@ -1815,6 +1951,11 @@ add(settingsCmd, "Utility", "Administrator", async (i) => {
   const muteRole = i.options.getRole("mute_role"),
     support = i.options.getChannel("support_category"),
     managerRole = i.options.getRole("manager_role"),
+    helperRole = i.options.getRole("helper_role"),
+    modRole = i.options.getRole("mod_role"),
+    headmodRole = i.options.getRole("headmod_role"),
+    adminRole = i.options.getRole("admin_role"),
+    theysixRole = i.options.getRole("themsix_role"),
     log = i.options.getChannel("log_channel"),
     transcriptCh = i.options.getChannel("ticket_transcripts"),
     prefix = i.options.getString("prefix");
@@ -1825,6 +1966,11 @@ add(settingsCmd, "Utility", "Administrator", async (i) => {
     values.support_category_id = support.id;
   }
   if (managerRole) values.manager_role_id = managerRole.id;
+  if (helperRole) values.helper_role_id = helperRole.id;
+  if (modRole) values.mod_role_id = modRole.id;
+  if (headmodRole) values.headmod_role_id = headmodRole.id;
+  if (adminRole) values.admin_role_id = adminRole.id;
+  if (themsixRole) values.themsix_role_id = theysixRole.id;
   if (log) values.log_channel_id = log.id;
   if (transcriptCh) values.ticket_transcript_channel_id = transcriptCh.id;
   if (prefix) {
@@ -1837,7 +1983,7 @@ add(settingsCmd, "Utility", "Administrator", async (i) => {
       components: [
         embed(
           "Guild settings",
-          `Mute role: ${s.mute_role_id ? `<@&${s.mute_role_id}>` : "not set"}\nSupport category: ${s.support_category_id ? `<#${s.support_category_id}>` : "not set"}\nManager role: ${s.manager_role_id ? `<@&${s.manager_role_id}>` : "not set"}\nLog channel: ${s.log_channel_id ? `<#${s.log_channel_id}>` : "not set"}\nTicket transcript channel: ${s.ticket_transcript_channel_id ? `<#${s.ticket_transcript_channel_id}>` : "not set"}\nPrefix: ${s.prefix || "m."}\nAppeal link: ${s.appeal_link || "not set"}`,
+          `Mute role: ${s.mute_role_id ? `<@&${s.mute_role_id}>` : "not set"}\nSupport category: ${s.support_category_id ? `<#${s.support_category_id}>` : "not set"}\nManager role: ${s.manager_role_id ? `<@&${s.manager_role_id}>` : "not set"}\nHelper role: ${s.helper_role_id ? `<@&${s.helper_role_id}>` : "not set"}\nMod role: ${s.mod_role_id ? `<@&${s.mod_role_id}>` : "not set"}\nHeadmod role: ${s.headmod_role_id ? `<@&${s.headmod_role_id}>` : "not set"}\nAdmin role: ${s.admin_role_id ? `<@&${s.admin_role_id}>` : "not set"}\nTheySix role: ${s.themsix_role_id ? `<@&${s.themsix_role_id}>` : "not set"}\nLog channel: ${s.log_channel_id ? `<#${s.log_channel_id}>` : "not set"}\nTicket transcript channel: ${s.ticket_transcript_channel_id ? `<#${s.ticket_transcript_channel_id}>` : "not set"}\nPrefix: ${s.prefix || "m."}\nAppeal link: ${s.appeal_link || "not set"}`,
         ),
       ],
       ephemeral: true,
@@ -1848,7 +1994,7 @@ add(settingsCmd, "Utility", "Administrator", async (i) => {
       components: [
         embed(
           "Settings updated",
-          `Mute role: ${s.mute_role_id ? `<@&${s.mute_role_id}>` : "not set"}\nSupport category: ${s.support_category_id ? `<#${s.support_category_id}>` : "not set"}\nManager role: ${s.manager_role_id ? `<@&${s.manager_role_id}>` : "not set"}\nLog channel: ${s.log_channel_id ? `<#${s.log_channel_id}>` : "not set"}\nTicket transcript channel: ${s.ticket_transcript_channel_id ? `<#${s.ticket_transcript_channel_id}>` : "not set"}\nPrefix: ${s.prefix || "m."}\nAppeal link: ${s.appeal_link || "not set"}`,
+          `Mute role: ${s.mute_role_id ? `<@&${s.mute_role_id}>` : "not set"}\nSupport category: ${s.support_category_id ? `<#${s.support_category_id}>` : "not set"}\nManager role: ${s.manager_role_id ? `<@&${s.manager_role_id}>` : "not set"}\nHelper role: ${s.helper_role_id ? `<@&${s.helper_role_id}>` : "not set"}\nMod role: ${s.mod_role_id ? `<@&${s.mod_role_id}>` : "not set"}\nHeadmod role: ${s.headmod_role_id ? `<@&${s.headmod_role_id}>` : "not set"}\nAdmin role: ${s.admin_role_id ? `<@&${s.admin_role_id}>` : "not set"}\nTheySix role: ${s.themsix_role_id ? `<@&${s.themsix_role_id}>` : "not set"}\nLog channel: ${s.log_channel_id ? `<#${s.log_channel_id}>` : "not set"}\nTicket transcript channel: ${s.ticket_transcript_channel_id ? `<#${s.ticket_transcript_channel_id}>` : "not set"}\nPrefix: ${s.prefix || "m."}\nAppeal link: ${s.appeal_link || "not set"}`,
         ),
       ],
     });

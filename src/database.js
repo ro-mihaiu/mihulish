@@ -23,7 +23,7 @@ db.exec(`
 `);
 db.exec(`
 CREATE TABLE IF NOT EXISTS guilds (guild_id TEXT PRIMARY KEY, created_at INTEGER NOT NULL);
-CREATE TABLE IF NOT EXISTS guild_settings (guild_id TEXT PRIMARY KEY REFERENCES guilds(guild_id) ON DELETE CASCADE, mute_role_id TEXT, support_category_id TEXT, manager_role_id TEXT, log_channel_id TEXT, prefix TEXT NOT NULL DEFAULT 'm.', loa_rules TEXT NOT NULL DEFAULT '[]', sloa_rules TEXT NOT NULL DEFAULT '[]', appeal_link TEXT);
+CREATE TABLE IF NOT EXISTS guild_settings (guild_id TEXT PRIMARY KEY REFERENCES guilds(guild_id) ON DELETE CASCADE, mute_role_id TEXT, support_category_id TEXT, manager_role_id TEXT, log_channel_id TEXT, prefix TEXT NOT NULL DEFAULT 'm.', loa_rules TEXT NOT NULL DEFAULT '[]', sloa_rules TEXT NOT NULL DEFAULT '[]', appeal_link TEXT, mod_role_id TEXT, headmod_role_id TEXT, admin_role_id TEXT, theysix_role_id TEXT, helper_role_id TEXT);
 `);
 
 try {
@@ -86,9 +86,10 @@ CREATE TABLE IF NOT EXISTS ticket_learning (
 );
 CREATE INDEX IF NOT EXISTS ticket_learning_guild ON ticket_learning(guild_id, status, created_at);
 CREATE TABLE IF NOT EXISTS custom_commands (guild_id TEXT NOT NULL, trigger TEXT NOT NULL, content TEXT NOT NULL, created_by TEXT, created_at INTEGER NOT NULL, PRIMARY KEY (guild_id, trigger));
-CREATE TABLE IF NOT EXISTS saved_embeds (guild_id TEXT NOT NULL, embed_id TEXT NOT NULL, channel_id TEXT NOT NULL, webhook_id TEXT, message_id TEXT, title TEXT, content TEXT, author_id TEXT, author_name TEXT, created_at INTEGER NOT NULL, updated_at INTEGER, PRIMARY KEY (guild_id, embed_id));
+CREATE TABLE IF NOT EXISTS saved_embeds (guild_id TEXT NOT NULL, embed_id TEXT NOT NULL, channel_id TEXT, webhook_id TEXT, message_id TEXT, title TEXT, content TEXT, author_id TEXT, author_name TEXT, created_at INTEGER NOT NULL, updated_at INTEGER, PRIMARY KEY (guild_id, embed_id));
 CREATE INDEX IF NOT EXISTS saved_embeds_channel ON saved_embeds(guild_id, channel_id);
 CREATE TABLE IF NOT EXISTS embed_webhooks (guild_id TEXT NOT NULL, channel_id TEXT NOT NULL, webhook_id TEXT NOT NULL, webhook_token TEXT NOT NULL, created_at INTEGER NOT NULL, PRIMARY KEY (guild_id, channel_id));
+CREATE TABLE IF NOT EXISTS ticket_answers (id INTEGER PRIMARY KEY AUTOINCREMENT, guild_id TEXT NOT NULL, channel_id TEXT NOT NULL, panel TEXT NOT NULL, question TEXT NOT NULL, answer TEXT NOT NULL, created_at INTEGER NOT NULL, FOREIGN KEY (guild_id) REFERENCES guilds(guild_id) ON DELETE CASCADE, UNIQUE(guild_id, channel_id, question));
 `);
 
 // Column migrations for pre-existing tables (must run after the CREATE TABLE
@@ -161,6 +162,14 @@ try {
   db.exec("ALTER TABLE guild_settings ADD COLUMN dn_link_style TEXT");
 } catch (error) {
   if (!error.message.includes("duplicate column name")) throw error;
+}
+// Role-based access for ticket channels: mod, headmod, admin, theysix, helper.
+for (const col of ["mod_role_id", "headmod_role_id", "admin_role_id", "themsix_role_id", "helper_role_id"]) {
+  try {
+    db.exec(`ALTER TABLE guild_settings ADD COLUMN ${col} TEXT`);
+  } catch (error) {
+    if (!error.message.includes("duplicate column name")) throw error;
+  }
 }
 // Dedicated channel for ticket transcripts and user ratings.
 try {
@@ -283,11 +292,16 @@ function updateSettings(guildId, values) {
     "mute_role_id",
     "support_category_id",
     "manager_role_id",
+    "helper_role_id",
     "log_channel_id",
     "ticket_transcript_channel_id",
     "prefix",
     "appeal_link",
     "dn_link_style",
+    "mod_role_id",
+    "headmod_role_id",
+    "admin_role_id",
+    "themsix_role_id",
   ];
 
   for (const key of allowedKeys) {
@@ -494,6 +508,30 @@ function listOpenTickets(g) {
 }
 function deleteTicket(g, c) {
   db.prepare("DELETE FROM tickets WHERE guild_id=? AND channel_id=?").run(g, c);
+}
+// Stores the answers from a ticket's question form, keyed by question label.
+// `questions` is the PANEL_QUESTIONS array for the panel (passed by the caller
+// to avoid a circular require between database.js and tickets.js).
+function saveTicketAnswers(g, c, panel, answers, questions) {
+  if (!isAllowedGuild(g)) return;
+  ensureGuild(g);
+  const now = Date.now();
+  db.prepare("DELETE FROM ticket_answers WHERE guild_id=? AND channel_id=?").run(g, c);
+  for (let i = 0; i < (questions || []).length; i++) {
+    const q = questions[i];
+    const label = typeof q === "object" ? (q.label || `q${i}`) : String(q);
+    const answer = answers && answers[i] ? String(answers[i]) : null;
+    if (!answer) continue;
+    db.prepare(
+      "INSERT OR REPLACE INTO ticket_answers (guild_id, channel_id, panel, question, answer, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+    ).run(g, c, panel, label, answer, now);
+  }
+}
+function ticketAnswers(g, c) {
+  const rows = db
+    .prepare("SELECT question, answer FROM ticket_answers WHERE guild_id=? AND channel_id=? ORDER BY id")
+    .all(g, c);
+  return rows.map((r) => r.answer);
 }
 // Stores the creator's 1-5 star rating for a closed ticket.
 function saveTicketRating(g, c, userId, stars) {
@@ -1207,6 +1245,8 @@ module.exports = {
   deleteTicket,
   ticketPingDisabled,
   setTicketPingDisabled,
+  saveTicketAnswers,
+  ticketAnswers,
   addStaffTag,
   removeStaffTag,
   removeAllStaffTags,

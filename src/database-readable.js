@@ -25,7 +25,12 @@ db.exec(`
     manager_role_id TEXT,
     log_channel_id TEXT,
     loa_rules TEXT NOT NULL DEFAULT '[]',
-    sloa_rules TEXT NOT NULL DEFAULT '[]'
+    sloa_rules TEXT NOT NULL DEFAULT '[]',
+    appeal_link TEXT,
+    mod_role_id TEXT,
+    headmod_role_id TEXT,
+    admin_role_id TEXT,
+    theysix_role_id TEXT
   );
 
   CREATE TABLE IF NOT EXISTS staff (
@@ -137,7 +142,7 @@ function getSettings(guildId) {
 
 function updateSettings(guildId, values) {
   ensureGuild(guildId);
-  const allowedKeys = ['mute_role_id', 'support_category_id', 'manager_role_id', 'log_channel_id'];
+  const allowedKeys = ['mute_role_id', 'support_category_id', 'manager_role_id', 'log_channel_id', 'appeal_link', 'dn_link_style', 'mod_role_id', 'headmod_role_id', 'admin_role_id', 'themsix_role_id'];
 
   for (const key of allowedKeys) {
     if (Object.prototype.hasOwnProperty.call(values, key)) {
