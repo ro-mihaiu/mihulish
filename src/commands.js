@@ -1315,7 +1315,7 @@ const ticketCmd = new SlashCommandBuilder()
   )
   .addSubcommand((s) =>
     s
-      .setName("staff helper")
+      .setName("staff-helper")
       .setDescription("Ping staff by role or expertise tags for the current ticket")
       .addStringOption((o) =>
         o
@@ -1334,7 +1334,7 @@ const ticketCmd = new SlashCommandBuilder()
 add(ticketCmd, "Tickets", "Staff", async (i) => {
   if (!staff(i)) return deny(i);
   const sub = i.options.getSubcommand();
-  if (sub === "staff helper") {
+  if (sub === "staff-helper") {
     const t = store.ticket(i.guildId, i.channelId);
     if (!t || t.status !== "OPEN" || !t.ticket_user_id)
       return respond(i, {
