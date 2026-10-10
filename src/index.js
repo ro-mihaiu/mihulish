@@ -144,15 +144,13 @@ async function inspectTicket(channel) {
   if (!channel.guild) return;
   const info = ticketInfo(channel);
   if (!info) return;
-  if (info.closed) store.deleteTicket(channel.guild.id, channel.id);
-  else
-    store.saveTicket(
-      channel.guild.id,
-      channel.id,
-      info.panel,
-      info.userId,
-      "OPEN",
-    );
+  store.saveTicket(
+    channel.guild.id,
+    channel.id,
+    info.panel,
+    info.userId,
+    info.closed ? "CLOSED" : "OPEN",
+  );
 }
 client.on(Events.ChannelCreate, inspectTicket);
 client.on(Events.ChannelUpdate, (_old, next) => inspectTicket(next));
