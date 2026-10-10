@@ -19,7 +19,6 @@ const { EmbedBuilder,
   TextInputStyle,
 } = require("discord.js");
 const store = require("./database");
-const { learnFromClosedTicket, isLearningEnabled } = require("./ticket-learning");
 const { sendDM } = require("./utils");
 
 const PANEL_CUSTOM_ID = "ticket_open";
@@ -30,8 +29,6 @@ const CLOSE_CUSTOM_ID = "ticket_close";
 const REOPEN_CUSTOM_ID = "ticket_reopen";
 const DELETE_CUSTOM_ID = "ticket_delete";
 const CLAIM_CUSTOM_ID = "ticket_claim";
-const RATING_CUSTOM_ID = "ticket_rate";
-const RATING_CANCEL_CUSTOM_ID = "ticket_rate_skip";
 
 // ---------- helpers ----------
 
@@ -41,6 +38,15 @@ function escapeHtml(s) {
     .replaceAll("<", "&lt;")
     .replaceAll(">", "&gt;")
     .replaceAll('"', "&quot;");
+}
+
+function formatUptime(ms) {
+  if (ms < 0) ms = 0;
+  const seconds = Math.floor(ms / 1000);
+  const minutes = Math.floor(seconds / 60);
+  const hours = Math.floor(minutes / 60);
+  const days = Math.floor(hours / 24);
+  return `${days} days, ${hours % 24}h, ${minutes % 60}m, ${seconds % 60}s`;
 }
 
 function supportCategoryId(guildId) {
@@ -599,25 +605,6 @@ async function closeTicket(interaction, { viaCommand = false } = {}) {
 
   await generateAndPostTranscript(guild, interaction.channel, t, "closed", interaction.user);
 
-  // Auto-learn from the ticket conversation (if enabled for this guild)
-  if (isLearningEnabled(guild.id)) {
-    try {
-      const result = await learnFromClosedTicket(guild, interaction.channel, t);
-      if (result.learned > 0) {
-        await logToChannel(guild, {
-          embeds: [
-            embed(
-              "Auto-learning",
-              `Extracted ${result.learned} potential knowledge item(s) from this ticket for staff review. Use \`/learn\` to curate.`,
-            ),
-          ],
-        });
-      }
-    } catch (e) {
-      console.error("[tickets] auto-learn failed:", e.message);
-    }
-  }
-
   // Rename with the closed- prefix — the ChannelUpdate handler in index.js
   // will mark the ticket CLOSED and strip the claim automatically.
   try {
@@ -629,7 +616,7 @@ async function closeTicket(interaction, { viaCommand = false } = {}) {
 
   const reply = embed(
     "Ticket closed",
-    `This ticket has been closed by <@${interaction.user.id}>. A transcript has been saved.\n` +
+    `This ticket has been closed by <@${interaction.user.id}>.\n` +
     `Staff can reopen or delete it below.`,
   );
   reply.setFooter({ text: "Mihulish | Ticket System" });
@@ -679,18 +666,17 @@ async function deleteTicket(interaction) {
     return notice(interaction, "Only staff can delete a ticket.");
 
   await interaction.deferReply({ flags: 64 });
-  const logTo = store.settings(guild.id)?.log_channel_id
-    ? guild.channels.cache.get(store.settings(guild.id).log_channel_id)
-    : null;
-  const status = t.status === "CLOSED" ? "deleted (was closed)" : "deleted";
-  await generateAndPostTranscript(guild, interaction.channel, t, status, interaction.user);
-  await interaction.editReply({ content: `Transcript saved${logTo ? ` in <#${logTo.id}>` : ""}. Deleting ticket in 5 seconds…` });
+
+  // The transcript was already generated when the ticket was closed.
+  // Deleting just logs the action and removes the channel.
   await logToChannel(guild, {
     embeds: [
       embed("Ticket deleted",
         `**${t.panel}** ticket <#${interaction.channelId}> deleted by <@${interaction.user.id}>`),
     ],
   });
+
+  await interaction.editReply({ content: "Deleting ticket in 5 seconds…" });
   setTimeout(() => {
     interaction.channel.delete(`Ticket deleted by ${interaction.user.tag}`).catch(() => { });
   }, 5000);
@@ -698,11 +684,8 @@ async function deleteTicket(interaction) {
 
 // ---------- transcript ----------
 
-// Fetches the whole channel history (up to 2000 messages) and renders an HTML
-// transcript. The transcript is attached to the configured ticket transcript
-// channel, the mod-log channel, and DMed to the ticket creator together with a
-// 1-5 star rating form. HTML because it preserves names, timestamps, colours
-// and attachments without any dependency.
+// Fetches the whole channel history (up to 2000 messages), renders an HTML
+// transcript, and posts a branded embed to the configured transcript channel.
 async function generateAndPostTranscript(guild, channel, ticketRow, status, actor) {
   let messages = [];
   try {
@@ -725,100 +708,45 @@ async function generateAndPostTranscript(guild, channel, ticketRow, status, acto
 
   const html = renderTranscript(guild, channel, ticketRow, status, actor, messages);
   const fileName = `transcript-${ticketRow.panel}-${channel.id}.html`;
-  const caption =
-    `📄 Transcript for **${ticketRow.panel}** ticket \`${channel.name}\` (${status}${actor ? ` by <@${actor.id}>` : ""})`;
 
-  // Configured ticket transcript channel (set via /settings ticket_transcripts).
   const transcriptChannelId = store.settings(guild.id)?.ticket_transcript_channel_id;
-  if (transcriptChannelId) {
-    const ch = guild.channels.cache.get(transcriptChannelId);
-    if (ch?.isTextBased()) {
-      await ch
-        .send({ content: caption, files: [transcriptAttachment(html, fileName)], allowedMentions: { parse: [] } })
-        .catch((e) => console.error("[tickets] transcript channel:", e.message));
-    }
-  }
+  if (!transcriptChannelId) return html;
 
-  // Mod-log channel (previous behaviour, kept as a fallback/archive).
-  await logToChannel(guild, {
-    content: caption,
-    files: [transcriptAttachment(html, fileName)],
-    allowedMentions: { parse: [] },
-  });
+  const ch = guild.channels.cache.get(transcriptChannelId);
+  if (!ch?.isTextBased()) return html;
 
-  // DM the ticket creator the transcript plus a rating form.
-  if (ticketRow.ticket_user_id) {
-    await sendTicketRatingDM(guild.client, ticketRow, html, fileName, channel.name);
-  }
-}
+  const owner = await guild.members.fetch(ticketRow.ticket_user_id).catch(() => null);
+  const ownerTag = owner ? owner.user.tag : (ticketRow.ticket_user_id ? `<@${ticketRow.ticket_user_id}>` : "unknown");
+  const uptime = formatUptime(Date.now() - ticketRow.created_at);
+  const closingReason = actor ? `Closed by <@${actor.id}>` : status;
+  const claimedBy = ticketRow.assigned_staff_id
+    ? (await guild.members.fetch(ticketRow.assigned_staff_id).catch(() => null))?.user.tag || `<@${ticketRow.assigned_staff_id}>`
+    : "Unclaimed";
 
-function transcriptAttachment(html, name) {
-  return new AttachmentBuilder(Buffer.from(html, "utf8"), { name });
-}
-
-function ratingRow() {
-  const row = new ActionRowBuilder();
-  for (let stars = 1; stars <= 5; stars++) {
-    row.addComponents(
-      new ButtonBuilder()
-        .setCustomId(`${RATING_CUSTOM_ID}|${stars}`)
-        .setLabel("⭐".repeat(stars))
-        .setStyle(stars >= 4 ? ButtonStyle.Success : stars === 3 ? ButtonStyle.Secondary : ButtonStyle.Danger),
-    );
-  }
-  return row;
-}
-
-// DMs the ticket creator their transcript and asks them to rate the support
-// they received. Ratings are logged to the transcript channel and mod-log.
-async function sendTicketRatingDM(client, ticketRow, html, fileName, channelName) {
-  const user = await client.users.fetch(ticketRow.ticket_user_id).catch(() => null);
-  if (!user) return;
-  try {
-    await user.send({
-      content:
-        `📄 Here is the transcript of your **${ticketRow.panel}** ticket \`${channelName}\`.\n` +
-        `How would you rate the support you received?`,
-      files: [transcriptAttachment(html, fileName)],
-      components: [ratingRow()],
-    });
-  } catch {
-    // The user has DMs closed — nothing we can do.
-  }
-}
-
-async function handleRatingInteraction(interaction) {
-  // The rating buttons live in the user's DMs, so the guild comes from the
-  // ticket row instead of the interaction.
-  const stars = Number(interaction.customId.slice(RATING_CUSTOM_ID.length + 1));
-  if (!Number.isInteger(stars) || stars < 1 || stars > 5) return;
-  const row = store.db
-    .prepare(
-      "SELECT * FROM tickets WHERE ticket_user_id=? AND status='CLOSED' ORDER BY closed_at DESC LIMIT 1",
+  const transcriptEmbed = new EmbedBuilder()
+    .setColor(0x5865f2)
+    .setTitle("TheySix | Minecraft")
+    .setThumbnail(guild.iconURL({ size: 64 }) || undefined)
+    .setDescription(`Ticket has been ${status}`)
+    .addFields(
+      { name: "\u{1F464} Ticket Owner", value: ownerTag, inline: true },
+      { name: "\u{1F3AB} Ticket ID", value: `closed-${channel.name}`, inline: true },
+      { name: "\u{1F553} Uptime", value: uptime, inline: true },
+      { name: "\u{1F534} Closing reason", value: closingReason, inline: true },
+      { name: "\u{1F4DC} Web Transcript", value: "[Click here](https://discord.com/channels/" + guild.id + "/" + channel.id + ") to view the full transcript", inline: false },
     )
-    .get(interaction.user.id);
-  const rating = store.saveTicketRating(row?.guild_id, row?.channel_id, interaction.user.id, stars);
-  await interaction
-    .update({
-      content:
-        `📄 Transcript attached above.\n` +
-        (stars >= 4
-          ? `Thank you! Your **${stars}⭐** rating means a lot to the support team. 💚`
-          : `Thank you for your **${stars}⭐** rating — we're sorry the support didn't fully meet your expectations. Your feedback helps us improve.`),
-      components: [],
+    .setFooter({ text: `Claimed by ${claimedBy} \u2022 Mihulish Ticket System` })
+    .setTimestamp();
+
+  await ch
+    .send({
+      embeds: [transcriptEmbed],
+      files: [new AttachmentBuilder(Buffer.from(html, "utf8"), { name: fileName })],
+      allowedMentions: { parse: [] },
     })
-    .catch(() => {});
-  if (rating && row) {
-    const guild = interaction.client.guilds.cache.get(row.guild_id);
-    if (guild) {
-      const desc =
-        `<@${interaction.user.id}> rated their **${row.panel}** ticket \`${row.channel_id}\` **${"⭐".repeat(stars)}** (${stars}/5).`;
-      const transcriptChannelId = store.settings(row.guild_id)?.ticket_transcript_channel_id;
-      const ch = transcriptChannelId ? guild.channels.cache.get(transcriptChannelId) : null;
-      if (ch?.isTextBased()) await ch.send({ embeds: [embed("Ticket rating", desc)], allowedMentions: { parse: [] } }).catch(() => {});
-      await logToChannel(guild, { embeds: [embed("Ticket rating", desc)], allowedMentions: { parse: [] } });
-    }
-  }
+    .catch((e) => console.error("[tickets] transcript channel:", e.message));
+
+  return html;
 }
 
 function renderTranscript(guild, channel, t, status, actor, messages) {
@@ -920,12 +848,6 @@ async function handleTicketInteraction(interaction) {
 
   if (!interaction.isButton()) return false;
   const id = interaction.customId;
-  if (id.startsWith(`${RATING_CUSTOM_ID}|`)) {
-    await handleRatingInteraction(interaction).catch((e) =>
-      console.error("[tickets] rating:", e.message),
-    );
-    return true;
-  }
   if (id === CLAIM_CUSTOM_ID) {
     await claimTicket(interaction).catch((e) =>
       console.error("[tickets] claim button:", e.message),
