@@ -172,7 +172,7 @@ async function handlePrefixMessage(message) {
   }
 
   if (command.name === "update") {
-    return reply(message, { components: [buildUpdateEmbed()] });
+    return reply(message, { embeds: buildUpdateEmbed() });
   }
 
   if (command.name === "prefix") {

@@ -317,11 +317,35 @@ function buildUpdateEmbed() {
     fs.readFileSync(path.join(__dirname, "..", "updates", "latest.json"), "utf8"),
   );
   const changes = update.changes.map((change, index) => `${index + 1}. ${change}`).join("\n");
-  return new EmbedBuilder()
-    .setColor(COLOR)
-    .setTitle("Mihulish - Latest Changes")
-    .setDescription(changes || "No changes have been published yet.")
-    .setFooter({ text: `${update.date} - ${update.version}` });
+  const footer = { text: `${update.date} - ${update.version}` };
+  if (!changes)
+    return new EmbedBuilder()
+      .setColor(COLOR)
+      .setTitle("Mihulish - Latest Changes")
+      .setDescription("No changes have been published yet.")
+      .setFooter(footer);
+  // Discord caps embed descriptions at 4096 chars — split into chunks on line
+  // boundaries so long changelogs are spread across multiple embeds.
+  const MAX = 4096;
+  const chunks = [];
+  let current = "";
+  for (const line of changes.split("\n")) {
+    if (current && current.length + 1 + line.length > MAX) {
+      chunks.push(current);
+      current = line;
+    } else {
+      current = current ? `${current}\n${line}` : line;
+    }
+  }
+  if (current) chunks.push(current);
+  return chunks.map(
+    (chunk, index) =>
+      new EmbedBuilder()
+        .setColor(COLOR)
+        .setTitle(index === 0 ? "Mihulish - Latest Changes" : null)
+        .setDescription(chunk)
+        .setFooter(index === chunks.length - 1 ? footer : null),
+  );
 }
 
 add(
@@ -343,7 +367,7 @@ add(
     .setDescription("Show the latest Mihulish changes"),
   "Utility",
   "Everyone",
-  (i) => respond(i, { components: [buildUpdateEmbed()] }),
+  (i) => respond(i, { embeds: buildUpdateEmbed() }),
 );
 const invite = new SlashCommandBuilder()
   .setName("invite")

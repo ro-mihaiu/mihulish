@@ -1,2 +1,11 @@
-[2026-09-06 11:55:07] [mihulish] was added to 1234567890
-[2026-09-06 11:55:07] [mihulish] someone ran /test in 987654321 and got this error TestError
+[2026-10-11 10:57:59] [mihulish] ready as mihulish#5559
+[2026-10-11 10:57:59] [commands] registered 43 commands for 1530248481481162824 (guild 985227944236568606)
+[2026-10-11 12:55:12] Error: Received one or more errors
+    at _UnionValidator.handle (/home/container/node_modules/@sapphire/shapeshift/dist/cjs/index.cjs:1965:23)
+    at _UnionValidator.parse (/home/container/node_modules/@sapphire/shapeshift/dist/cjs/index.cjs:972:90)
+    at EmbedBuilder.setDescription (/home/container/node_modules/@discordjs/builders/dist/index.js:336:26)
+    at buildUpdateEmbed (/home/container/src/commands.js:323:6)
+    at Object.execute (/home/container/src/commands.js:346:36)
+    at Client.<anonymous> (/home/container/src/index.js:374:19)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+[2026-10-11 12:55:12] [mihulish] someone ran /update in 985227944236568606 and got this error Error — Received one or more errors
