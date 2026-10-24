@@ -1961,6 +1961,9 @@ const settingsCmd = new SlashCommandBuilder()
   .addChannelOption((o) =>
     o.setName("qotd_channel").setDescription("Channel where the daily Question of the Day is posted"),
   )
+  .addRoleOption((o) =>
+    o.setName("qotd_role").setDescription("Role to ping when the daily Question of the Day is posted"),
+  )
   .addStringOption((o) =>
     o
       .setName("prefix")
@@ -1986,6 +1989,7 @@ add(settingsCmd, "Utility", "Administrator", async (i) => {
     log = i.options.getChannel("log_channel"),
     transcriptCh = i.options.getChannel("ticket_transcripts"),
     qotdCh = i.options.getChannel("qotd_channel"),
+    qotdRole = i.options.getRole("qotd_role"),
     prefix = i.options.getString("prefix");
   if (muteRole) values.mute_role_id = muteRole.id;
   if (support) {
@@ -2006,6 +2010,7 @@ add(settingsCmd, "Utility", "Administrator", async (i) => {
       return deny(i, "The QOTD channel must be a text channel.");
     values.qotd_channel_id = qotdCh.id;
   }
+  if (qotdRole) values.qotd_role_id = qotdRole.id;
   if (prefix) {
     if (/\s/.test(prefix)) return deny(i, "The prefix cannot contain spaces.");
     values.prefix = prefix;

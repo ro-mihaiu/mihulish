@@ -187,6 +187,12 @@ try {
 } catch (error) {
   if (!error.message.includes("duplicate column name")) throw error;
 }
+// Role pinged when the daily Question of the Day is posted.
+try {
+  db.exec("ALTER TABLE guild_settings ADD COLUMN qotd_role_id TEXT");
+} catch (error) {
+  if (!error.message.includes("duplicate column name")) throw error;
+}
 try {
   db.exec("CREATE INDEX IF NOT EXISTS farms_type ON farms(guild_id, type, created_at)");
 } catch {}
@@ -306,6 +312,7 @@ function updateSettings(guildId, values) {
     "log_channel_id",
     "ticket_transcript_channel_id",
     "qotd_channel_id",
+    "qotd_role_id",
     "prefix",
     "appeal_link",
     "dn_link_style",

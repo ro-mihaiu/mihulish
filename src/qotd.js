@@ -144,14 +144,17 @@ async function postQotd(client, guild) {
     .setTitle("Question of the Day")
     .setDescription(question)
     .addFields(
-      { name: "Ziua", value: String(day), inline: true },
-      { name: "Dată", value: today, inline: true },
+      { name: "Day", value: String(day), inline: true },
+      { name: "Date", value: today, inline: true },
     )
-    .setFooter({ text: "Mihulish QOTD · postat la 00:00 GMT+0" })
+    .setFooter({ text: "Mihulish QOTD · posted at 00:00 GMT+0" })
     .setTimestamp();
 
+  const roleId = s && s.qotd_role_id ? s.qotd_role_id : null;
+  const content = roleId ? `<@&${roleId}>` : null;
+
   const message = await apiWithBackoff(() =>
-    channel.send({ embeds: [embed] }),
+    channel.send({ content, embeds: [embed] }),
   );
 
   const thread = await apiWithBackoff(() =>
@@ -162,6 +165,13 @@ async function postQotd(client, guild) {
       reason: "QOTD daily discussion thread",
     }),
   );
+
+  const threadEmbed = new EmbedBuilder(embed.data).addFields({
+    name: "Discussion Thread",
+    value: `Public thread created: <#${thread.id}>`,
+    inline: true,
+  });
+  await apiWithBackoff(() => message.edit({ embeds: [threadEmbed] }));
 
   store.addQotdThread(guild.id, message.id, thread.id, channel.id, Date.now());
   store.setQotdState(guild.id, day, today);
