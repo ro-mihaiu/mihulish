@@ -1958,6 +1958,9 @@ const settingsCmd = new SlashCommandBuilder()
   .addChannelOption((o) =>
     o.setName("ticket_transcripts").setDescription("Channel where ticket transcripts and ratings are posted"),
   )
+  .addChannelOption((o) =>
+    o.setName("qotd_channel").setDescription("Channel where the daily Question of the Day is posted"),
+  )
   .addStringOption((o) =>
     o
       .setName("prefix")
@@ -1982,6 +1985,7 @@ add(settingsCmd, "Utility", "Administrator", async (i) => {
     theysixRole = i.options.getRole("themsix_role"),
     log = i.options.getChannel("log_channel"),
     transcriptCh = i.options.getChannel("ticket_transcripts"),
+    qotdCh = i.options.getChannel("qotd_channel"),
     prefix = i.options.getString("prefix");
   if (muteRole) values.mute_role_id = muteRole.id;
   if (support) {
@@ -1997,6 +2001,11 @@ add(settingsCmd, "Utility", "Administrator", async (i) => {
   if (themsixRole) values.themsix_role_id = theysixRole.id;
   if (log) values.log_channel_id = log.id;
   if (transcriptCh) values.ticket_transcript_channel_id = transcriptCh.id;
+  if (qotdCh) {
+    if (!qotdCh.isTextBased())
+      return deny(i, "The QOTD channel must be a text channel.");
+    values.qotd_channel_id = qotdCh.id;
+  }
   if (prefix) {
     if (/\s/.test(prefix)) return deny(i, "The prefix cannot contain spaces.");
     values.prefix = prefix;
@@ -2007,7 +2016,7 @@ add(settingsCmd, "Utility", "Administrator", async (i) => {
       components: [
         embed(
           "Guild settings",
-          `Mute role: ${s.mute_role_id ? `<@&${s.mute_role_id}>` : "not set"}\nSupport category: ${s.support_category_id ? `<#${s.support_category_id}>` : "not set"}\nManager role: ${s.manager_role_id ? `<@&${s.manager_role_id}>` : "not set"}\nHelper role: ${s.helper_role_id ? `<@&${s.helper_role_id}>` : "not set"}\nMod role: ${s.mod_role_id ? `<@&${s.mod_role_id}>` : "not set"}\nHeadmod role: ${s.headmod_role_id ? `<@&${s.headmod_role_id}>` : "not set"}\nAdmin role: ${s.admin_role_id ? `<@&${s.admin_role_id}>` : "not set"}\nTheySix role: ${s.themsix_role_id ? `<@&${s.themsix_role_id}>` : "not set"}\nLog channel: ${s.log_channel_id ? `<#${s.log_channel_id}>` : "not set"}\nTicket transcript channel: ${s.ticket_transcript_channel_id ? `<#${s.ticket_transcript_channel_id}>` : "not set"}\nPrefix: ${s.prefix || "m."}\nAppeal link: ${s.appeal_link || "not set"}`,
+          `Mute role: ${s.mute_role_id ? `<@&${s.mute_role_id}>` : "not set"}\nSupport category: ${s.support_category_id ? `<#${s.support_category_id}>` : "not set"}\nManager role: ${s.manager_role_id ? `<@&${s.manager_role_id}>` : "not set"}\nHelper role: ${s.helper_role_id ? `<@&${s.helper_role_id}>` : "not set"}\nMod role: ${s.mod_role_id ? `<@&${s.mod_role_id}>` : "not set"}\nHeadmod role: ${s.headmod_role_id ? `<@&${s.headmod_role_id}>` : "not set"}\nAdmin role: ${s.admin_role_id ? `<@&${s.admin_role_id}>` : "not set"}\nTheySix role: ${s.themsix_role_id ? `<@&${s.themsix_role_id}>` : "not set"}\nLog channel: ${s.log_channel_id ? `<#${s.log_channel_id}>` : "not set"}\nTicket transcript channel: ${s.ticket_transcript_channel_id ? `<#${s.ticket_transcript_channel_id}>` : "not set"}\nQOTD channel: ${s.qotd_channel_id ? `<#${s.qotd_channel_id}>` : "not set"}\nPrefix: ${s.prefix || "m."}\nAppeal link: ${s.appeal_link || "not set"}`,
         ),
       ],
       ephemeral: true,
@@ -2018,7 +2027,7 @@ add(settingsCmd, "Utility", "Administrator", async (i) => {
       components: [
         embed(
           "Settings updated",
-          `Mute role: ${s.mute_role_id ? `<@&${s.mute_role_id}>` : "not set"}\nSupport category: ${s.support_category_id ? `<#${s.support_category_id}>` : "not set"}\nManager role: ${s.manager_role_id ? `<@&${s.manager_role_id}>` : "not set"}\nHelper role: ${s.helper_role_id ? `<@&${s.helper_role_id}>` : "not set"}\nMod role: ${s.mod_role_id ? `<@&${s.mod_role_id}>` : "not set"}\nHeadmod role: ${s.headmod_role_id ? `<@&${s.headmod_role_id}>` : "not set"}\nAdmin role: ${s.admin_role_id ? `<@&${s.admin_role_id}>` : "not set"}\nTheySix role: ${s.themsix_role_id ? `<@&${s.themsix_role_id}>` : "not set"}\nLog channel: ${s.log_channel_id ? `<#${s.log_channel_id}>` : "not set"}\nTicket transcript channel: ${s.ticket_transcript_channel_id ? `<#${s.ticket_transcript_channel_id}>` : "not set"}\nPrefix: ${s.prefix || "m."}\nAppeal link: ${s.appeal_link || "not set"}`,
+          `Mute role: ${s.mute_role_id ? `<@&${s.mute_role_id}>` : "not set"}\nSupport category: ${s.support_category_id ? `<#${s.support_category_id}>` : "not set"}\nManager role: ${s.manager_role_id ? `<@&${s.manager_role_id}>` : "not set"}\nHelper role: ${s.helper_role_id ? `<@&${s.helper_role_id}>` : "not set"}\nMod role: ${s.mod_role_id ? `<@&${s.mod_role_id}>` : "not set"}\nHeadmod role: ${s.headmod_role_id ? `<@&${s.headmod_role_id}>` : "not set"}\nAdmin role: ${s.admin_role_id ? `<@&${s.admin_role_id}>` : "not set"}\nTheySix role: ${s.themsix_role_id ? `<@&${s.themsix_role_id}>` : "not set"}\nLog channel: ${s.log_channel_id ? `<#${s.log_channel_id}>` : "not set"}\nTicket transcript channel: ${s.ticket_transcript_channel_id ? `<#${s.ticket_transcript_channel_id}>` : "not set"}\nQOTD channel: ${s.qotd_channel_id ? `<#${s.qotd_channel_id}>` : "not set"}\nPrefix: ${s.prefix || "m."}\nAppeal link: ${s.appeal_link || "not set"}`,
         ),
       ],
     });

@@ -31,6 +31,7 @@ const {
 const { handleTicketInteraction } = require("./tickets");
 const { handlePrefixMessage } = require("./prefix");
 const { logCommand, logEvent, sendDM } = require("./commands");
+const { startQotdScheduler, QOTD_BANK } = require("./qotd");
 const logger = require("./logger");
 
 // One-shot importers are optional: if the import scripts/files were removed
@@ -111,6 +112,9 @@ client.once(Events.ClientReady, async (c) => {
       e,
     ),
   );
+  console.log(`[qotd] bank loaded with ${QOTD_BANK.length} question(s)`);
+  logger.log(`[qotd] bank loaded with ${QOTD_BANK.length} question(s)`);
+  startQotdScheduler(c);
 });
 client.on(Events.GuildCreate, (g) => {
   store.ensureGuild(g.id);
