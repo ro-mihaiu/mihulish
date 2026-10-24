@@ -1998,7 +1998,7 @@ add(settingsCmd, "Utility", "Administrator", async (i) => {
   if (modRole) values.mod_role_id = modRole.id;
   if (headmodRole) values.headmod_role_id = headmodRole.id;
   if (adminRole) values.admin_role_id = adminRole.id;
-  if (themsixRole) values.themsix_role_id = theysixRole.id;
+  if (theysixRole) values.themsix_role_id = theysixRole.id;
   if (log) values.log_channel_id = log.id;
   if (transcriptCh) values.ticket_transcript_channel_id = transcriptCh.id;
   if (qotdCh) {
