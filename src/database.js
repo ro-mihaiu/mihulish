@@ -90,7 +90,7 @@ CREATE TABLE IF NOT EXISTS saved_embeds (guild_id TEXT NOT NULL, embed_id TEXT N
 CREATE INDEX IF NOT EXISTS saved_embeds_channel ON saved_embeds(guild_id, channel_id);
 CREATE TABLE IF NOT EXISTS embed_webhooks (guild_id TEXT NOT NULL, channel_id TEXT NOT NULL, webhook_id TEXT NOT NULL, webhook_token TEXT NOT NULL, created_at INTEGER NOT NULL, PRIMARY KEY (guild_id, channel_id));
 CREATE TABLE IF NOT EXISTS ticket_answers (id INTEGER PRIMARY KEY AUTOINCREMENT, guild_id TEXT NOT NULL, channel_id TEXT NOT NULL, panel TEXT NOT NULL, question TEXT NOT NULL, answer TEXT NOT NULL, created_at INTEGER NOT NULL, FOREIGN KEY (guild_id) REFERENCES guilds(guild_id) ON DELETE CASCADE, UNIQUE(guild_id, channel_id, question));
-CREATE TABLE IF NOT EXISTS ticket_close_requests (id INTEGER PRIMARY KEY AUTOINCREMENT, guild_id TEXT NOT NULL, channel_id TEXT NOT NULL, requested_by TEXT NOT NULL, reason TEXT NOT NULL, limit_hours INTEGER NOT NULL, status TEXT NOT NULL DEFAULT 'pending', created_at INTEGER NOT NULL, resolved_at INTEGER, resolved_by TEXT, FOREIGN KEY (guild_id) REFERENCES guilds(guild_id) ON DELETE CASCADE, UNIQUE(guild_id, channel_id, status));
+CREATE TABLE IF NOT EXISTS ticket_close_requests (id INTEGER PRIMARY KEY AUTOINCREMENT, guild_id TEXT NOT NULL, channel_id TEXT NOT NULL, requested_by TEXT NOT NULL, reason TEXT NOT NULL, limit_hours INTEGER, status TEXT NOT NULL DEFAULT 'pending', created_at INTEGER NOT NULL, resolved_at INTEGER, resolved_by TEXT, FOREIGN KEY (guild_id) REFERENCES guilds(guild_id) ON DELETE CASCADE, UNIQUE(guild_id, channel_id, status));
 CREATE INDEX IF NOT EXISTS ticket_close_requests_guild ON ticket_close_requests(guild_id, status, created_at);
 `);
 
@@ -575,11 +575,14 @@ function resolveCloseRequest(g, c, status, resolvedBy) {
 function expireCloseRequests(g) {
   // Mark any pending request whose limit has elapsed as expired. The actual
   // ticket closure is performed by the caller (see tickets.js sweep).
+  // Requests without a limit (null) are closed immediately on approval and
+  // never reach this sweep — they are skipped here.
   if (!isAllowedGuild(g)) return [];
   const now = Date.now();
   const rows = listPendingCloseRequests(g);
   const expired = [];
   for (const row of rows) {
+    if (row.limit_hours == null) continue;
     const dueAt = row.created_at + row.limit_hours * 3600 * 1000;
     if (now >= dueAt) {
       db.prepare(

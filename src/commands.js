@@ -269,7 +269,7 @@ function buildHelpEmbed(prefix = "m.") {
         { name: "ticket", desc: "Ping ticket owners whose tickets have no staff reply" },
         { name: "panel", desc: "Post the ticket panel so users can open tickets" },
         { name: "close", desc: "Close the current ticket and save a transcript" },
-        { name: "closerequest", desc: "Request that the current ticket be closed with a reason and time limit" },
+        { name: "closerequest", desc: "Request that the current ticket be closed (optionally with a time limit)" },
       ],
     },
     {
@@ -1604,10 +1604,10 @@ const closeRequestCmd = new SlashCommandBuilder()
   .addIntegerOption((o) =>
     o
       .setName("limit")
-      .setDescription("Hours until the ticket auto-closes if approved (1-720)")
+      .setDescription("Hours until the ticket auto-closes if approved (1-720; omit to close immediately on approval)")
       .setMinValue(1)
       .setMaxValue(720)
-      .setRequired(true),
+      .setRequired(false),
   );
 add(closeRequestCmd, "Tickets", "Everyone", async (i) => {
   return respond(i, await runCloseRequestCommand(i));

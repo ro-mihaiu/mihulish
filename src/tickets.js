@@ -993,9 +993,10 @@ async function runCloseCommand(interaction) {
 const CLOSE_REQUEST_APPROVE_CUSTOM_ID = "ticket_close_request_approve";
 const CLOSE_REQUEST_REJECT_CUSTOM_ID = "ticket_close_request_reject";
 
-// `/closerequest` — a ticket owner requests closure with a reason and a time
-// limit (in hours). Staff can approve or reject; when approved the ticket is
-// scheduled to auto-close once the limit elapses.
+// `/closerequest` — a ticket owner requests closure with a reason and an
+// optional time limit (in hours). Staff can approve or reject; when approved
+// the ticket closes immediately if no limit was given, or auto-closes once
+// the limit elapses.
 async function runCloseRequestCommand(interaction) {
   const guild = interaction.guild;
   const t = ticketRowForChannel(guild.id, interaction.channelId);
@@ -1007,16 +1008,18 @@ async function runCloseRequestCommand(interaction) {
     return { content: "Only the ticket owner can request closure.", ephemeral: true };
   }
   const reason = interaction.options.getString("reason", true).trim();
-  const limit = interaction.options.getInteger("limit", true);
-  if (limit < 1 || limit > 720) {
+  const limit = interaction.options.getInteger("limit"); // optional — null when omitted
+  if (limit !== null && (limit < 1 || limit > 720)) {
     return { content: "Limit must be between 1 and 720 hours.", ephemeral: true };
   }
   store.createCloseRequest(guild.id, interaction.channelId, interaction.user.id, reason, limit);
-  const dueAt = Date.now() + limit * 3600 * 1000;
+  const dueAt = limit ? Date.now() + limit * 3600 * 1000 : Date.now();
   // Post a staff-facing review message with approve/reject buttons.
   try {
     await interaction.channel.send({
-      content: `Closure request from <@${interaction.user.id}> — **${reason}**\nAuto-close in **${limit}h** (<t:${Math.floor(dueAt / 1000)}:f>) if approved.`,
+      content: `Closure request from <@${interaction.user.id}> — **${reason}**${
+        limit ? `\nAuto-close in **${limit}h** (<t:${Math.floor(dueAt / 1000)}:f>) if approved.` : "\nIf approved, this ticket will close immediately."
+      }`,
       components: [
         new ActionRowBuilder().addComponents(
           new ButtonBuilder()
@@ -1034,7 +1037,9 @@ async function runCloseRequestCommand(interaction) {
     });
   } catch {}
   return {
-    content: `Your closure request has been submitted. A staff member will review it. If approved, this ticket will auto-close in **${limit}h** (<t:${Math.floor(dueAt / 1000)}:f>).`,
+    content: `Your closure request has been submitted. A staff member will review it.${
+      limit ? ` If approved, this ticket will auto-close in **${limit}h** (<t:${Math.floor(dueAt / 1000)}:f>).` : " If approved, this ticket will close immediately."
+    }`,
     ephemeral: true,
   };
 }
@@ -1065,6 +1070,27 @@ async function handleCloseRequestButton(interaction) {
   }
   const approved = interaction.customId === CLOSE_REQUEST_APPROVE_CUSTOM_ID;
   store.resolveCloseRequest(guild.id, interaction.channelId, approved ? "approved" : "rejected", interaction.user.id);
+  // When no limit was given, close the ticket right away instead of
+  // scheduling it for the sweep.
+  if (approved && !row.limit_hours) {
+    const fakeInteraction = {
+      guild,
+      channelId: interaction.channelId,
+      channel: interaction.channel,
+      user: { id: row.requested_by, tag: "ticket owner" },
+      memberPermissions: { has: () => false },
+      deferReply: async () => ({}),
+      editReply: async () => ({}),
+      reply: async () => ({}),
+    };
+    try {
+      await closeTicket(fakeInteraction, { viaCommand: true });
+    } catch (e) {
+      console.error("[close-request] immediate close:", e.message);
+    }
+    await interaction.reply({ content: "Closure request **approved** — ticket closed.", ephemeral: true }).catch(() => {});
+    return true;
+  }
   const dueAt = row.created_at + row.limit_hours * 3600 * 1000;
   await interaction.reply({
     content: approved
