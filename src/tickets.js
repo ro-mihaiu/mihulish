@@ -1117,7 +1117,6 @@ module.exports = {
   runCloseRequestCommand,
   handleCloseRequestButton,
   processExpiredCloseRequests,
-  CLOSE_REQUEST_CUSTOM_ID,
   CLOSE_REQUEST_APPROVE_CUSTOM_ID,
   CLOSE_REQUEST_REJECT_CUSTOM_ID,
   ticketControls,
