@@ -1,0 +1,9 @@
+{
+  "date": "2026-10-26",
+  "version": "v1.15.8",
+  "changes": [
+    "Added `/closerequest`: a ticket owner can request that their ticket be closed, providing a reason and a time limit (1-720 hours). When a staff member approves the request via the ✅/❌ buttons posted in the ticket, the ticket auto-closes once the limit elapses.",
+    "Closure requests are stored in SQLite (`ticket_close_requests` table) with pending/approved/rejected/expired states; one pending request per ticket at a time.",
+    "A periodic sweep (running on the same 5-minute interval as the stale-ticket pings) expires approved requests whose limit has passed and closes the corresponding ticket, generating the transcript and closed-notice just like `/close`."
+  ]
+}

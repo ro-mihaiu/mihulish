@@ -269,6 +269,7 @@ function buildHelpEmbed(prefix = "m.") {
         { name: "ticket", desc: "Ping ticket owners whose tickets have no staff reply" },
         { name: "panel", desc: "Post the ticket panel so users can open tickets" },
         { name: "close", desc: "Close the current ticket and save a transcript" },
+        { name: "closerequest", desc: "Request that the current ticket be closed with a reason and time limit" },
       ],
     },
     {
@@ -1588,6 +1589,28 @@ const closeCmd = new SlashCommandBuilder()
   .setDescription("Close the current ticket and save a transcript");
 add(closeCmd, "Tickets", "Staff", async (i) => {
   return respond(i, await runCloseCommand(i));
+});
+
+const closeRequestCmd = new SlashCommandBuilder()
+  .setName("closerequest")
+  .setDescription("Request that the current ticket be closed")
+  .addStringOption((o) =>
+    o
+      .setName("reason")
+      .setDescription("Reason for requesting closure")
+      .setRequired(true)
+      .setMaxLength(500),
+  )
+  .addIntegerOption((o) =>
+    o
+      .setName("limit")
+      .setDescription("Hours until the ticket auto-closes if approved (1-720)")
+      .setMinValue(1)
+      .setMaxValue(720)
+      .setRequired(true),
+  );
+add(closeRequestCmd, "Tickets", "Everyone", async (i) => {
+  return respond(i, await runCloseRequestCommand(i));
 });
 
 // ---------------- Ported from Drako Bot: /purge, /snipe, /addrole,

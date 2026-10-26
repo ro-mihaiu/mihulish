@@ -90,6 +90,8 @@ CREATE TABLE IF NOT EXISTS saved_embeds (guild_id TEXT NOT NULL, embed_id TEXT N
 CREATE INDEX IF NOT EXISTS saved_embeds_channel ON saved_embeds(guild_id, channel_id);
 CREATE TABLE IF NOT EXISTS embed_webhooks (guild_id TEXT NOT NULL, channel_id TEXT NOT NULL, webhook_id TEXT NOT NULL, webhook_token TEXT NOT NULL, created_at INTEGER NOT NULL, PRIMARY KEY (guild_id, channel_id));
 CREATE TABLE IF NOT EXISTS ticket_answers (id INTEGER PRIMARY KEY AUTOINCREMENT, guild_id TEXT NOT NULL, channel_id TEXT NOT NULL, panel TEXT NOT NULL, question TEXT NOT NULL, answer TEXT NOT NULL, created_at INTEGER NOT NULL, FOREIGN KEY (guild_id) REFERENCES guilds(guild_id) ON DELETE CASCADE, UNIQUE(guild_id, channel_id, question));
+CREATE TABLE IF NOT EXISTS ticket_close_requests (id INTEGER PRIMARY KEY AUTOINCREMENT, guild_id TEXT NOT NULL, channel_id TEXT NOT NULL, requested_by TEXT NOT NULL, reason TEXT NOT NULL, limit_hours INTEGER NOT NULL, status TEXT NOT NULL DEFAULT 'pending', created_at INTEGER NOT NULL, resolved_at INTEGER, resolved_by TEXT, FOREIGN KEY (guild_id) REFERENCES guilds(guild_id) ON DELETE CASCADE, UNIQUE(guild_id, channel_id, status));
+CREATE INDEX IF NOT EXISTS ticket_close_requests_guild ON ticket_close_requests(guild_id, status, created_at);
 `);
 
 
@@ -536,6 +538,57 @@ function ticketAnswers(g, c) {
     .prepare("SELECT question, answer FROM ticket_answers WHERE guild_id=? AND channel_id=? ORDER BY id")
     .all(g, c);
   return rows.map((r) => r.answer);
+}
+// ---------------- Ticket close requests ----------------
+// A user can request that their ticket be closed with a reason and a time
+// limit (in hours). Staff can approve/reject the request; when approved the
+// ticket is scheduled to auto-close after the limit expires.
+function createCloseRequest(g, c, requestedBy, reason, limitHours) {
+  if (!isAllowedGuild(g)) return null;
+  ensureGuild(g);
+  // One pending request per ticket — replace any existing one.
+  db.prepare("DELETE FROM ticket_close_requests WHERE guild_id=? AND channel_id=? AND status='pending'").run(g, c);
+  db.prepare(
+    "INSERT INTO ticket_close_requests (guild_id, channel_id, requested_by, reason, limit_hours, status, created_at) VALUES (?, ?, ?, ?, ?, 'pending', ?)",
+  ).run(g, c, requestedBy, reason, limitHours, Date.now());
+  return getCloseRequest(g, c);
+}
+function getCloseRequest(g, c) {
+  return db
+    .prepare("SELECT * FROM ticket_close_requests WHERE guild_id=? AND channel_id=? AND status='pending'")
+    .get(g, c);
+}
+function listPendingCloseRequests(g) {
+  return db
+    .prepare("SELECT * FROM ticket_close_requests WHERE guild_id=? AND status='pending' ORDER BY created_at DESC")
+    .all(g);
+}
+function resolveCloseRequest(g, c, status, resolvedBy) {
+  if (!isAllowedGuild(g)) return null;
+  const row = getCloseRequest(g, c);
+  if (!row) return null;
+  db.prepare(
+    "UPDATE ticket_close_requests SET status=?, resolved_at=?, resolved_by=? WHERE guild_id=? AND channel_id=? AND status='pending'",
+  ).run(status, Date.now(), resolvedBy || null, g, c);
+  return getCloseRequest(g, c);
+}
+function expireCloseRequests(g) {
+  // Mark any pending request whose limit has elapsed as expired. The actual
+  // ticket closure is performed by the caller (see tickets.js sweep).
+  if (!isAllowedGuild(g)) return [];
+  const now = Date.now();
+  const rows = listPendingCloseRequests(g);
+  const expired = [];
+  for (const row of rows) {
+    const dueAt = row.created_at + row.limit_hours * 3600 * 1000;
+    if (now >= dueAt) {
+      db.prepare(
+        "UPDATE ticket_close_requests SET status='expired', resolved_at=?, resolved_by='system' WHERE guild_id=? AND channel_id=? AND status='pending'",
+      ).run(now, g, row.channel_id);
+      expired.push({ ...row, status: "expired" });
+    }
+  }
+  return expired;
 }
 // Stores the creator's 1-5 star rating for a closed ticket.
 function saveTicketRating(g, c, userId, stars) {
@@ -1326,4 +1379,9 @@ module.exports = {
   ticket,
   assignTicket,
   saveTicketRating,
+  createCloseRequest,
+  getCloseRequest,
+  listPendingCloseRequests,
+  resolveCloseRequest,
+  expireCloseRequests,
 };

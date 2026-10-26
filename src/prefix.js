@@ -80,6 +80,23 @@ function reply(message, payload) {
   });
 }
 
+// Moderation commands that work through the text prefix delete the staff
+// member's raw command message shortly after it runs, so the action is visible
+// only through the bot's reply embed / log channel instead of cluttering chat.
+const AUTO_DELETE_PREFIX_COMMANDS = new Set([
+  "warn", "unwarn", "mute", "unmute", "kick", "ban", "unban",
+]);
+const AUTO_DELETE_DELAY_MS = 5000;
+function autoDeleteCommandMessage(message, commandName) {
+  if (!AUTO_DELETE_PREFIX_COMMANDS.has(commandName)) return;
+  setTimeout(() => {
+    message.delete().catch((error) => {
+      // Missing permissions or someone beat us to it are both fine to ignore.
+      console.error("[prefix] could not auto-delete command message:", error.message ?? error);
+    });
+  }, AUTO_DELETE_DELAY_MS);
+}
+
 function cleanId(text) {
   if (!text) return null;
   const match = text.match(/^<@!?(\d+)>$|^<@&(\d+)>$|^<#(\d+)>$|^(\d+)$/);
@@ -143,6 +160,10 @@ async function handlePrefixMessage(message) {
   if (!command) return;
 
   const p = getPrefix(message.guild.id);
+
+  // Schedule the staff message for deletion before running anything, so the
+  // cleanup also happens on failed/permission-denied moderation attempts.
+  autoDeleteCommandMessage(message, command.name);
 
   logCommand(message.guild.id, message.client, {
     command: `${p}${command.name}`,

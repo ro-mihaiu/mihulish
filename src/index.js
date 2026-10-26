@@ -28,7 +28,7 @@ const {
   finishEndedPolls,
   deliverDueReminders,
 } = require("./commands");
-const { handleTicketInteraction } = require("./tickets");
+const { handleTicketInteraction, handleCloseRequestButton, processExpiredCloseRequests } = require("./tickets");
 const { handlePrefixMessage } = require("./prefix");
 const { logCommand, logEvent, sendDM } = require("./commands");
 const logger = require("./logger");
@@ -278,6 +278,13 @@ async function checkTicketReminders() {
       console.error("[ticket-reminders]", e.message);
     }
   }
+  // Auto-close tickets whose approved /closerequest limit has elapsed.
+  try {
+    const closed = await processExpiredCloseRequests(client);
+    if (closed) console.log(`[close-request] auto-closed ${closed} ticket(s).`);
+  } catch (e) {
+    console.error("[close-request]", e.message);
+  }
 }
 
 setInterval(checkTicketReminders, TICKET_SWEEP_INTERVAL_MS);
@@ -306,6 +313,13 @@ client.on(Events.InteractionCreate, async (i) => {
   if (
     await handleTicketInteraction(i).catch((e) => {
       console.error("[tickets]", e.message);
+      return true;
+    })
+  )
+    return;
+  if (
+    await handleCloseRequestButton(i).catch((e) => {
+      console.error("[close-request]", e.message);
       return true;
     })
   )

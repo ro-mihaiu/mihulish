@@ -1,9 +1,9 @@
 {
   "date": "2026-10-26",
-  "version": "v1.15.7",
+  "version": "v1.15.8",
   "changes": [
-    "Added `/rules`: posts the TheySix Discord rules as a Components V2 message (two accent-colored containers with dividers and link buttons for the ToS, guidelines, EULA, usage guidelines, and wiki legal pages), gated behind Manage Messages.",
-    "The rules content lives in one place (`rulesComponentPayload` in src/commands.js) with a `RULES_LAST_UPDATED` constant, so updating the rules text or date is a one-line change.",
-    "Removed the entire Question of the Day (QOTD) system: the scheduler, question bank CSV, `/settings qotd_channel` and `/settings qotd_role` options, QOTD SQLite tables and state helpers, and the reset script."
+    "Added `/closerequest`: a ticket owner can request that their ticket be closed, providing a reason and a time limit (1-720 hours). When a staff member approves the request via the ✅/❌ buttons posted in the ticket, the ticket auto-closes once the limit elapses.",
+    "Closure requests are stored in SQLite (`ticket_close_requests` table) with pending/approved/rejected/expired states; one pending request per ticket at a time.",
+    "A periodic sweep (running on the same 5-minute interval as the stale-ticket pings) expires approved requests whose limit has passed and closes the corresponding ticket, generating the transcript and closed-notice just like `/close`."
   ]
 }
