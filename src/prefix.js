@@ -597,7 +597,7 @@ async function handlePrefixMessage(message) {
     });
   }
 
-  if (command.name === "ban" || command.name === "softban") {
+  if (command.name === "ban") {
     if (
       !message.member.permissions.has(PermissionFlagsBits.BanMembers) &&
       !isBotOwner(message.author.id, message.client)
@@ -625,45 +625,22 @@ async function handlePrefixMessage(message) {
     ) {
       return reply(message, "You cannot moderate a member with an equal or higher role.");
     }
-    if (command.name === "softban") {
-      await message.guild.members.ban(targetUser.id, {
-        reason: `[Softban] ${reason}`,
-        deleteMessageSeconds: 86400 * 7,
-      });
-      await message.guild.members.unban(targetUser.id, "Softban unban");
-      logModeration(message.guild.id, message.client, {
-        action: "softban",
-        targetId: targetUser.id,
-        moderatorId: message.author.id,
-        reason,
-      });
-      sendDM(message.author.id, message.client, "Softban Complete", `You softbanned <@${targetUser.id}> in **${message.guild.name}**.\nReason: ${reason}`).catch(() => {});
-      const appealLink = store.getAppealLink(message.guild.id);
-      const softDesc = `You were softbanned from **${message.guild.name}**.\nReason: ${reason}${appealLink ? `\nAppeal: ${appealLink}` : ""}`;
-      sendDM(targetUser.id, message.client, "Softbanned", softDesc).catch(() => {});
-      return reply(message, {
-        components: [
-          embed("Softban complete", `<@${targetUser.id}> was softbanned.\nReason: ${reason}`),
-        ],
-      });
-    } else {
-      await message.guild.members.ban(targetUser.id, { reason });
-      logModeration(message.guild.id, message.client, {
-        action: "ban",
-        targetId: targetUser.id,
-        moderatorId: message.author.id,
-        reason,
-      });
-      sendDM(message.author.id, message.client, "Ban Complete", `You banned <@${targetUser.id}> from **${message.guild.name}**.\nReason: ${reason}`).catch(() => {});
-      const appealLink = store.getAppealLink(message.guild.id);
-      const banDesc = `You were banned from **${message.guild.name}**.\nReason: ${reason}${appealLink ? `\nAppeal: ${appealLink}` : ""}`;
-      sendDM(targetUser.id, message.client, "Banned", banDesc).catch(() => {});
-      return reply(message, {
-        components: [
-          embed("Ban complete", `<@${targetUser.id}> was banned.\nReason: ${reason}`),
-        ],
-      });
-    }
+    await message.guild.members.ban(targetUser.id, { reason });
+    logModeration(message.guild.id, message.client, {
+      action: "ban",
+      targetId: targetUser.id,
+      moderatorId: message.author.id,
+      reason,
+    });
+    sendDM(message.author.id, message.client, "Ban Complete", `You banned <@${targetUser.id}> from **${message.guild.name}**.\nReason: ${reason}`).catch(() => {});
+    const appealLink = store.getAppealLink(message.guild.id);
+    const banDesc = `You were banned from **${message.guild.name}**.\nReason: ${reason}${appealLink ? `\nAppeal: ${appealLink}` : ""}`;
+    sendDM(targetUser.id, message.client, "Banned", banDesc).catch(() => {});
+    return reply(message, {
+      components: [
+        embed("Ban complete", `<@${targetUser.id}> was banned.\nReason: ${reason}`),
+      ],
+    });
   }
 
   if (command.name === "unban") {

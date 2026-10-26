@@ -244,7 +244,6 @@ function buildHelpEmbed(prefix = "m.") {
         { name: "kick", desc: "Kick a member from the server" },
         { name: "ban", desc: "Ban a member from the server" },
         { name: "unban", desc: "Unban a user from the server" },
-        { name: "softban", desc: "Softban a member (ban and prune messages)" },
         { name: "bans", desc: "List active server bans" },
         { name: "purge", desc: "Bulk delete recent messages in a channel" },
         { name: "snipe", desc: "Show the last deleted message in a channel" },
@@ -768,13 +767,84 @@ function moderation(name, perm, method, label) {
   );
 }
 moderation("kick", PermissionFlagsBits.KickMembers, "kick", "Kick a member");
-moderation("ban", PermissionFlagsBits.BanMembers, "ban", "Ban a member");
-moderation(
-  "softban",
-  PermissionFlagsBits.BanMembers,
-  "ban",
-  "Softban a member",
-);
+// Dyno-style /ban: user, reason, message preservation toggle and an
+// appeal-link suppression flag.
+const banCmd = new SlashCommandBuilder()
+  .setName("ban")
+  .setDescription("Ban a user from the server")
+  .setDefaultMemberPermissions(PermissionFlagsBits.BanMembers)
+  .addUserOption((o) =>
+    o.setName("user").setDescription("User to ban (member or ID)").setRequired(true),
+  )
+  .addStringOption((o) => o.setName("reason").setDescription("Reason for the ban"))
+  .addBooleanOption((o) =>
+    o
+      .setName("preserve_messages")
+      .setDescription("Keep the user's messages instead of deleting the last 7 days (default: delete)"),
+  )
+  .addBooleanOption((o) =>
+    o
+      .setName("no_appeal")
+      .setDescription("Do not include the server appeal link in the ban DM (default: include)"),
+  );
+add(banCmd, "Moderation", "Ban Members", async (i) => {
+  if (
+    !i.memberPermissions.has(PermissionFlagsBits.BanMembers) &&
+    !isBotOwner(i.user.id, i.client)
+  )
+    return deny(i, "You need Ban Members.");
+  // Dyno lets you ban by raw ID too, so accept members and bare IDs alike.
+  const memberArg = i.options.getMember("user");
+  const targetUser = memberArg?.user || i.options.getUser("user");
+  if (!targetUser) return deny(i, "I could not resolve that user.");
+  if (targetUser.id === i.guild.ownerId || targetUser.id === i.client.user.id)
+    return deny(i, "That user cannot be banned.");
+  if (
+    memberArg &&
+    !isBotOwner(i.user.id, i.client) &&
+    memberArg.roles?.highest?.position >= i.member.roles.highest.position
+  )
+    return deny(i, "You cannot ban a member with an equal or higher role.");
+
+  const reason = i.options.getString("reason") || "No reason provided";
+  // Discord's deleteMessageSeconds accepts 0-604800 (7 days); preserve_messages
+  // true means "don't purge", so send 0 instead of the 7-day default purge.
+  const deleteSeconds = i.options.getBoolean("preserve_messages") ? 0 : 604800;
+  const noAppeal = Boolean(i.options.getBoolean("no_appeal"));
+
+  try {
+    await i.guild.members.ban(targetUser.id, {
+      reason: `${reason} — by ${i.user.tag}`,
+      deleteMessageSeconds: deleteSeconds,
+    });
+  } catch (e) {
+    return deny(i, `Ban failed: ${e.message}`);
+  }
+  logModeration(i.guildId, i.client, {
+    action: "ban",
+    targetId: targetUser.id,
+    moderatorId: i.user.id,
+    reason,
+  });
+
+  const appealLink = noAppeal ? null : store.getAppealLink(i.guildId);
+  const modDesc = `You were banned from **${i.guild.name}**.\nReason: ${reason}${appealLink ? `\nAppeal: ${appealLink}` : ""}`;
+  sendDM(targetUser.id, i.client, "Banned", modDesc).catch(() => {});
+  sendDM(
+    i.user.id,
+    i.client,
+    "Ban Complete",
+    `You banned <@${targetUser.id}> in **${i.guild.name}**.\nReason: ${reason}`,
+  ).catch(() => {});
+  return respond(i, {
+    components: [
+      embed(
+        "Ban complete",
+        `${memberArg || `<@${targetUser.id}>`} was banned.\nReason: ${reason}\nMessages: ${deleteSeconds ? "last 7 days deleted" : "preserved"}`,
+      ),
+    ],
+  });
+});
 const mute = new SlashCommandBuilder()
   .setName("mute")
   .setDescription("Timeout a member")
@@ -1958,12 +2028,6 @@ const settingsCmd = new SlashCommandBuilder()
   .addChannelOption((o) =>
     o.setName("ticket_transcripts").setDescription("Channel where ticket transcripts and ratings are posted"),
   )
-  .addChannelOption((o) =>
-    o.setName("qotd_channel").setDescription("Channel where the daily Question of the Day is posted"),
-  )
-  .addRoleOption((o) =>
-    o.setName("qotd_role").setDescription("Role to ping when the daily Question of the Day is posted"),
-  )
   .addStringOption((o) =>
     o
       .setName("prefix")
@@ -1988,8 +2052,6 @@ add(settingsCmd, "Utility", "Administrator", async (i) => {
     theysixRole = i.options.getRole("themsix_role"),
     log = i.options.getChannel("log_channel"),
     transcriptCh = i.options.getChannel("ticket_transcripts"),
-    qotdCh = i.options.getChannel("qotd_channel"),
-    qotdRole = i.options.getRole("qotd_role"),
     prefix = i.options.getString("prefix");
   if (muteRole) values.mute_role_id = muteRole.id;
   if (support) {
@@ -2005,12 +2067,6 @@ add(settingsCmd, "Utility", "Administrator", async (i) => {
   if (theysixRole) values.themsix_role_id = theysixRole.id;
   if (log) values.log_channel_id = log.id;
   if (transcriptCh) values.ticket_transcript_channel_id = transcriptCh.id;
-  if (qotdCh) {
-    if (!qotdCh.isTextBased())
-      return deny(i, "The QOTD channel must be a text channel.");
-    values.qotd_channel_id = qotdCh.id;
-  }
-  if (qotdRole) values.qotd_role_id = qotdRole.id;
   if (prefix) {
     if (/\s/.test(prefix)) return deny(i, "The prefix cannot contain spaces.");
     values.prefix = prefix;
@@ -2021,7 +2077,7 @@ add(settingsCmd, "Utility", "Administrator", async (i) => {
       components: [
         embed(
           "Guild settings",
-          `Mute role: ${s.mute_role_id ? `<@&${s.mute_role_id}>` : "not set"}\nSupport category: ${s.support_category_id ? `<#${s.support_category_id}>` : "not set"}\nManager role: ${s.manager_role_id ? `<@&${s.manager_role_id}>` : "not set"}\nHelper role: ${s.helper_role_id ? `<@&${s.helper_role_id}>` : "not set"}\nMod role: ${s.mod_role_id ? `<@&${s.mod_role_id}>` : "not set"}\nHeadmod role: ${s.headmod_role_id ? `<@&${s.headmod_role_id}>` : "not set"}\nAdmin role: ${s.admin_role_id ? `<@&${s.admin_role_id}>` : "not set"}\nTheySix role: ${s.themsix_role_id ? `<@&${s.themsix_role_id}>` : "not set"}\nLog channel: ${s.log_channel_id ? `<#${s.log_channel_id}>` : "not set"}\nTicket transcript channel: ${s.ticket_transcript_channel_id ? `<#${s.ticket_transcript_channel_id}>` : "not set"}\nQOTD channel: ${s.qotd_channel_id ? `<#${s.qotd_channel_id}>` : "not set"}\nPrefix: ${s.prefix || "m."}\nAppeal link: ${s.appeal_link || "not set"}`,
+          `Mute role: ${s.mute_role_id ? `<@&${s.mute_role_id}>` : "not set"}\nSupport category: ${s.support_category_id ? `<#${s.support_category_id}>` : "not set"}\nManager role: ${s.manager_role_id ? `<@&${s.manager_role_id}>` : "not set"}\nHelper role: ${s.helper_role_id ? `<@&${s.helper_role_id}>` : "not set"}\nMod role: ${s.mod_role_id ? `<@&${s.mod_role_id}>` : "not set"}\nHeadmod role: ${s.headmod_role_id ? `<@&${s.headmod_role_id}>` : "not set"}\nAdmin role: ${s.admin_role_id ? `<@&${s.admin_role_id}>` : "not set"}\nTheySix role: ${s.themsix_role_id ? `<@&${s.themsix_role_id}>` : "not set"}\nLog channel: ${s.log_channel_id ? `<#${s.log_channel_id}>` : "not set"}\nTicket transcript channel: ${s.ticket_transcript_channel_id ? `<#${s.ticket_transcript_channel_id}>` : "not set"}\nPrefix: ${s.prefix || "m."}\nAppeal link: ${s.appeal_link || "not set"}`,
         ),
       ],
       ephemeral: true,
@@ -2032,10 +2088,102 @@ add(settingsCmd, "Utility", "Administrator", async (i) => {
       components: [
         embed(
           "Settings updated",
-          `Mute role: ${s.mute_role_id ? `<@&${s.mute_role_id}>` : "not set"}\nSupport category: ${s.support_category_id ? `<#${s.support_category_id}>` : "not set"}\nManager role: ${s.manager_role_id ? `<@&${s.manager_role_id}>` : "not set"}\nHelper role: ${s.helper_role_id ? `<@&${s.helper_role_id}>` : "not set"}\nMod role: ${s.mod_role_id ? `<@&${s.mod_role_id}>` : "not set"}\nHeadmod role: ${s.headmod_role_id ? `<@&${s.headmod_role_id}>` : "not set"}\nAdmin role: ${s.admin_role_id ? `<@&${s.admin_role_id}>` : "not set"}\nTheySix role: ${s.themsix_role_id ? `<@&${s.themsix_role_id}>` : "not set"}\nLog channel: ${s.log_channel_id ? `<#${s.log_channel_id}>` : "not set"}\nTicket transcript channel: ${s.ticket_transcript_channel_id ? `<#${s.ticket_transcript_channel_id}>` : "not set"}\nQOTD channel: ${s.qotd_channel_id ? `<#${s.qotd_channel_id}>` : "not set"}\nPrefix: ${s.prefix || "m."}\nAppeal link: ${s.appeal_link || "not set"}`,
+          `Mute role: ${s.mute_role_id ? `<@&${s.mute_role_id}>` : "not set"}\nSupport category: ${s.support_category_id ? `<#${s.support_category_id}>` : "not set"}\nManager role: ${s.manager_role_id ? `<@&${s.manager_role_id}>` : "not set"}\nHelper role: ${s.helper_role_id ? `<@&${s.helper_role_id}>` : "not set"}\nMod role: ${s.mod_role_id ? `<@&${s.mod_role_id}>` : "not set"}\nHeadmod role: ${s.headmod_role_id ? `<@&${s.headmod_role_id}>` : "not set"}\nAdmin role: ${s.admin_role_id ? `<@&${s.admin_role_id}>` : "not set"}\nTheySix role: ${s.themsix_role_id ? `<@&${s.themsix_role_id}>` : "not set"}\nLog channel: ${s.log_channel_id ? `<#${s.log_channel_id}>` : "not set"}\nTicket transcript channel: ${s.ticket_transcript_channel_id ? `<#${s.ticket_transcript_channel_id}>` : "not set"}\nPrefix: ${s.prefix || "m."}\nAppeal link: ${s.appeal_link || "not set"}`,
         ),
       ],
     });
+});
+
+// ---------------- /rules ----------------
+// Posts the TheySix Discord rules as a Components V2 message (two containers:
+// the rules themselves plus a disclaimer/punishments container), matching the
+// styled changelog-style messages used in the server.
+const RULES_LAST_UPDATED = "26th October 2026";
+function rulesComponentPayload() {
+  const text = (content) => ({ type: 10, content });
+  const divider = (spacing = 1) => ({ type: 14, divider: true, spacing });
+  const linkButton = (label, url) => ({ type: 2, style: 5, label, url });
+  const buttonRow = (...buttons) => ({ type: 1, components: buttons });
+  const container = (...components) => ({ type: 17, accent_color: 0x4cc4c0, components });
+  return {
+    flags: MessageFlags.IsComponentsV2,
+    components: [
+      container(
+        text(
+          "# [**TheySix Discord Rules**](https://wiki-theysix.ro-mihaiu.xyz/w/discord/theysix-discord-rules)\n" +
+            "Rules for keeping the TheySix Discord welcoming, organized, and safe. " +
+            "These rules apply to all members, messages, profiles, links, and channels.",
+        ),
+        divider(),
+        text(
+          "1. Respect Discord's Terms of Service, Community Guidelines, Minecraft's official policies, and applicable laws.",
+        ),
+        buttonRow(
+          linkButton("Discord's Terms of Service", "https://discord.com/terms"),
+          linkButton("Discord's Community Guidelines", "https://discord.com/guidelines"),
+          linkButton("Minecraft EULA", "https://www.minecraft.net/eula"),
+          linkButton("Minecraft's Usage Guidelines", "https://www.minecraft.net/usage-guidelines"),
+        ),
+        divider(),
+        buttonRow(
+          linkButton("Terms of Service", "https://wiki-theysix.ro-mihaiu.xyz/legal/terms"),
+          linkButton("Privacy Policy", "https://wiki-theysix.ro-mihaiu.xyz/legal/privacy"),
+          linkButton("Cookie Notice", "https://wiki-theysix.ro-mihaiu.xyz/legal/cookies"),
+        ),
+        text(
+          "2. Treat all members with respect.\n" +
+            "> **Includes but not limited to:** harassment, bullying, hate, slander, personal attacks, intimidation, and hostile behavior.\n\n" +
+            "3. Keep the server family-friendly.\n" +
+            "> **Applies to:** messages, images, links, profiles, and other content shared in the server.\n" +
+            "> **Includes:** NSFW or adult content.\n\n" +
+            "4. Use channels for their intended purpose and follow their descriptions and pinned messages.\n\n" +
+            "5. Minecraft creators may share their builds and YouTube videos in <#1390278045121904670>.\n" +
+            "> **Important:** Online shops, paid services, and paid promotions are not allowed, including in the self-promotion channel.\n\n" +
+            "6. Do not advertise commercial content to TheySix members.\n" +
+            "> **Includes:** online shops, paid services, paid promotions, and asking members to DM you to buy, sell, or hire.\n\n" +
+            "7. Use support channels before pinging staff.\n" +
+            "> You may ping a maximum of **2 Helpers once**. Try to choose Helpers without the **LOA** or **SLOA** tag.\n" +
+            "> If Helpers do not reply after several hours, you may ping a **Moderator once**.\n" +
+            "> Mass-pinging staff is not allowed.\n\n" +
+            "8. Use **<@&1563185329714765854>** only for genuinely urgent issues.\n" +
+            "> **Expected response:** usually between **1 and 8 hours**.\n" +
+            "> **Misuse:** may result in a warning. The **third warning may result in a ban**.\n\n" +
+            "9. Do not ping protected roles or staff without a valid reason.\n" +
+            "> Follow any additional instructions given by staff about role mentions.\n\n" +
+            "10. Do not create duplicate support requests.\n" +
+            "> Update your existing post or ticket instead of making another one.",
+        ),
+      ),
+      container(
+        text(
+          "**Disclaimer:** Not all behavior can be explicitly listed. Actions that harm the community, disrupt support, or exploit loopholes may still result in moderation. " +
+            "Decisions are made at staff discretion, considering context, severity, and history.",
+        ),
+        divider(),
+        text(
+          "### Punishments Applied\n" +
+            "> Server punishments vary depending on the infraction, the situation, and the user's history. Staff may use discretion and may also act on situations not explicitly listed in these rules. " +
+            "If you believe you have been treated unfairly by a staff member, contact a manager through <#1444669624435212308>.",
+        ),
+        divider(),
+        text(
+          "-# These rules may change from time to time. Check them regularly to stay up to date.\n" +
+            `-# Last updated : ${RULES_LAST_UPDATED}`,
+        ),
+      ),
+    ],
+  };
+}
+const rulesCmd = new SlashCommandBuilder()
+  .setName("rules")
+  .setDescription("Post the TheySix Discord rules as a styled message");
+add(rulesCmd, "Utility", "Manage Messages", async (i) => {
+  if (
+    !i.memberPermissions.has(PermissionFlagsBits.ManageMessages) &&
+    !isBotOwner(i.user.id, i.client)
+  )
+    return deny(i, "You need Manage Messages to post the rules.");
+  return respond(i, rulesComponentPayload());
 });
 
 const channelsCmd = new SlashCommandBuilder()

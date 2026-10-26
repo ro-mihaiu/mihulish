@@ -1,6 +1,8 @@
 .env
 data/*.db
 data/*.db-*
+data_old/**
+data_old/
 node_modules/
 discord-dev.md
 .vscode/

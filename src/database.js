@@ -90,9 +90,6 @@ CREATE TABLE IF NOT EXISTS saved_embeds (guild_id TEXT NOT NULL, embed_id TEXT N
 CREATE INDEX IF NOT EXISTS saved_embeds_channel ON saved_embeds(guild_id, channel_id);
 CREATE TABLE IF NOT EXISTS embed_webhooks (guild_id TEXT NOT NULL, channel_id TEXT NOT NULL, webhook_id TEXT NOT NULL, webhook_token TEXT NOT NULL, created_at INTEGER NOT NULL, PRIMARY KEY (guild_id, channel_id));
 CREATE TABLE IF NOT EXISTS ticket_answers (id INTEGER PRIMARY KEY AUTOINCREMENT, guild_id TEXT NOT NULL, channel_id TEXT NOT NULL, panel TEXT NOT NULL, question TEXT NOT NULL, answer TEXT NOT NULL, created_at INTEGER NOT NULL, FOREIGN KEY (guild_id) REFERENCES guilds(guild_id) ON DELETE CASCADE, UNIQUE(guild_id, channel_id, question));
-CREATE TABLE IF NOT EXISTS qotd_state (guild_id TEXT PRIMARY KEY REFERENCES guilds(guild_id) ON DELETE CASCADE, current_index INTEGER NOT NULL DEFAULT 0, last_post_date TEXT);
-CREATE TABLE IF NOT EXISTS qotd_threads (guild_id TEXT NOT NULL, message_id TEXT NOT NULL, thread_id TEXT NOT NULL, channel_id TEXT NOT NULL, posted_at INTEGER NOT NULL, locked INTEGER NOT NULL DEFAULT 0, archived INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (guild_id, thread_id));
-CREATE INDEX IF NOT EXISTS qotd_threads_posted ON qotd_threads(posted_at);
 `);
 
 
@@ -181,18 +178,6 @@ try {
 } catch (error) {
   if (!error.message.includes("duplicate column name")) throw error;
 }
-// Channel where the daily Question of the Day is posted.
-try {
-  db.exec("ALTER TABLE guild_settings ADD COLUMN qotd_channel_id TEXT");
-} catch (error) {
-  if (!error.message.includes("duplicate column name")) throw error;
-}
-// Role pinged when the daily Question of the Day is posted.
-try {
-  db.exec("ALTER TABLE guild_settings ADD COLUMN qotd_role_id TEXT");
-} catch (error) {
-  if (!error.message.includes("duplicate column name")) throw error;
-}
 try {
   db.exec("CREATE INDEX IF NOT EXISTS farms_type ON farms(guild_id, type, created_at)");
 } catch {}
@@ -206,6 +191,9 @@ try {
 // data. Idempotent, and never referenced by any command any more.
 db.exec("DROP TABLE IF EXISTS user_votes");
 db.exec("DROP TABLE IF EXISTS votes");
+// QOTD was removed the same way: drop its state and thread-tracking tables.
+db.exec("DROP TABLE IF EXISTS qotd_state");
+db.exec("DROP TABLE IF EXISTS qotd_threads");
 
 const DEFAULT_TICKET_PANELS = ["java", "br", "bug", "report", "partnership", "management"];
 
@@ -311,8 +299,6 @@ function updateSettings(guildId, values) {
     "helper_role_id",
     "log_channel_id",
     "ticket_transcript_channel_id",
-    "qotd_channel_id",
-    "qotd_role_id",
     "prefix",
     "appeal_link",
     "dn_link_style",
@@ -335,47 +321,6 @@ function updateSettings(guildId, values) {
 }
 function getPrefix(guildId) {
   return settings(guildId).prefix || "m.";
-}
-
-function getQotdState(guildId) {
-  if (!isAllowedGuild(guildId)) return null;
-  ensureGuild(guildId);
-  return (
-    db.prepare("SELECT * FROM qotd_state WHERE guild_id=?").get(guildId) || null
-  );
-}
-function setQotdState(guildId, currentIndex, lastPostDate) {
-  ensureGuild(guildId);
-  db.prepare(
-    "INSERT INTO qotd_state(guild_id,current_index,last_post_date) VALUES(?,?,?) ON CONFLICT(guild_id) DO UPDATE SET current_index=excluded.current_index,last_post_date=excluded.last_post_date",
-  ).run(guildId, currentIndex, lastPostDate);
-  return getQotdState(guildId);
-}
-function addQotdThread(guildId, messageId, threadId, channelId, postedAt) {
-  ensureGuild(guildId);
-  db.prepare(
-    "INSERT OR REPLACE INTO qotd_threads(guild_id,message_id,thread_id,channel_id,posted_at) VALUES(?,?,?,?,?)",
-  ).run(guildId, messageId, threadId, channelId, postedAt);
-}
-function getQotdThreadsDueForLock(now = Date.now()) {
-  return db
-    .prepare(
-      "SELECT * FROM qotd_threads WHERE locked=0 AND posted_at+86400000<=? ORDER BY posted_at",
-    )
-    .all(now);
-}
-function getQotdThreadsDueForArchive(now = Date.now()) {
-  return db
-    .prepare(
-      "SELECT * FROM qotd_threads WHERE archived=0 AND posted_at+172800000<=? ORDER BY posted_at",
-    )
-    .all(now);
-}
-function markQotdThreadLocked(threadId) {
-  db.prepare("UPDATE qotd_threads SET locked=1 WHERE thread_id=?").run(threadId);
-}
-function markQotdThreadArchived(threadId) {
-  db.prepare("UPDATE qotd_threads SET archived=1 WHERE thread_id=?").run(threadId);
 }
 
 function addWarning(g, u, m, r) {
@@ -1281,13 +1226,6 @@ module.exports = {
   settings,
   getPrefix,
   updateSettings,
-  getQotdState,
-  setQotdState,
-  addQotdThread,
-  getQotdThreadsDueForLock,
-  getQotdThreadsDueForArchive,
-  markQotdThreadLocked,
-  markQotdThreadArchived,
   addWarning,
   getWarning,
   deleteWarning,

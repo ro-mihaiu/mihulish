@@ -28,6 +28,11 @@ async function getLogChannel(guildId, client) {
 }
 
 async function logCommand(guildId, client, { command, input = "", user, channelName = "Unknown" }) {
+  // Console mirror of every command run (slash + prefix), independent of the
+  // per-guild log channel being configured.
+  console.log(
+    `[cmd] ${command}${input ? ` ${input}` : ""} — ${user?.username ?? user?.tag ?? user?.id ?? "unknown"} in #${channelName} (guild ${guildId ?? "dm"})`,
+  );
   const ch = await getLogChannel(guildId, client);
   if (!ch) return;
   try {
@@ -56,6 +61,9 @@ async function logEvent(guildId, client, { title = "Event Log", description = "N
 }
 
 async function logModeration(guildId, client, { action, targetId, moderatorId, reason }) {
+  console.log(
+    `[mod] ${action}${targetId ? ` on ${targetId}` : ""} by ${moderatorId ?? "unknown"}${reason ? ` — ${reason}` : ""} (guild ${guildId})`,
+  );
   store.addModerationLog(guildId, action, targetId, moderatorId, reason);
   const ch = await getLogChannel(guildId, client);
   if (!ch) return;
