@@ -631,7 +631,7 @@ async function claimTicket(interaction) {
 
 // ---------- close ----------
 
-async function closeTicket(interaction, { viaCommand = false } = {}) {
+async function closeTicket(interaction, { viaCommand = false, reason = null } = {}) {
   const guild = interaction.guild;
   const t = ticketRowForChannel(guild.id, interaction.channelId);
   if (!t || t.status !== "OPEN") {
@@ -661,7 +661,9 @@ async function closeTicket(interaction, { viaCommand = false } = {}) {
 
   const reply = embed(
     "Ticket closed",
-    `This ticket has been closed by <@${interaction.user.id}>.\n` +
+    `This ticket has been closed by <@${interaction.user.id}>.${
+      reason ? `\n**Reason:** ${reason}` : ""
+    }\n` +
     `Staff can reopen or delete it below.`,
   );
   reply.setFooter({ text: "Mihulish | Ticket System" });
@@ -684,7 +686,9 @@ async function closeTicket(interaction, { viaCommand = false } = {}) {
   await logToChannel(guild, {
     embeds: [
       embed("Ticket closed",
-        `**${t.panel}** ticket <#${interaction.channelId}> closed by <@${interaction.user.id}>`),
+        `**${t.panel}** ticket <#${interaction.channelId}> closed by <@${interaction.user.id}>.${
+          reason ? `\n**Reason:** ${reason}` : ""
+        }`),
     ],
   });
 
@@ -982,7 +986,8 @@ async function runCloseCommand(interaction) {
   ) {
     return { content: "Only staff can close tickets.", ephemeral: true };
   }
-  const result = await closeTicket(interaction, { viaCommand: true });
+  const reason = interaction.options.getString("reason")?.trim() || null;
+  const result = await closeTicket(interaction, { viaCommand: true, reason });
   if (result?.error) return { content: result.error, ephemeral: true };
   return {
     content: "Ticket closed. Transcript has been saved.",
@@ -1084,7 +1089,7 @@ async function handleCloseRequestButton(interaction) {
       reply: async () => ({}),
     };
     try {
-      await closeTicket(fakeInteraction, { viaCommand: true });
+      await closeTicket(fakeInteraction, { viaCommand: true, reason: row.reason });
     } catch (e) {
       console.error("[close-request] immediate close:", e.message);
     }
@@ -1126,7 +1131,7 @@ async function processExpiredCloseRequests(client) {
         reply: async () => ({}),
       };
       try {
-        await closeTicket(fakeInteraction, { viaCommand: true });
+        await closeTicket(fakeInteraction, { viaCommand: true, reason: row.reason });
         closed++;
       } catch (e) {
         console.error("[tickets] auto-close:", e.message);

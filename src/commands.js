@@ -1586,7 +1586,14 @@ add(panelCmd, "Tickets", "Manager", async (i) => {
 
 const closeCmd = new SlashCommandBuilder()
   .setName("close")
-  .setDescription("Close the current ticket and save a transcript");
+  .setDescription("Close the current ticket and save a transcript")
+  .addStringOption((o) =>
+    o
+      .setName("reason")
+      .setDescription("Reason for closing the ticket")
+      .setRequired(false)
+      .setMaxLength(500),
+  );
 add(closeCmd, "Tickets", "Staff", async (i) => {
   return respond(i, await runCloseCommand(i));
 });
