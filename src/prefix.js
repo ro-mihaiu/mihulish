@@ -1343,7 +1343,7 @@ async function handlePrefixMessage(message) {
       const remaining = Math.ceil((2 * 60 * 1000 - (Date.now() - last)) / 1000);
       return reply(message, `Please wait ${remaining}s before using \`${p}dn\` again.`);
     }
-    const siteUrl = `https://theysix.ro-mihaiu.xyz/farm/java/${encodeURIComponent(farm.dn)}`;
+    const siteUrl = `https://theysix.tech/dn/${encodeURIComponent(farm.dn)}`;
     try {
       const { embed: dnEmbed, row } = await buildDnEmbed(farm, message.guild.id, message.author);
       await message.author.send({
@@ -1420,7 +1420,7 @@ async function handlePrefixMessage(message) {
       const remaining = Math.ceil((2 * 60 * 1000 - (Date.now() - last)) / 1000);
       return reply(message, `Please wait ${remaining}s before using \`${p}vd\` again.`);
     }
-    const siteUrl = `https://theysix.ro-mihaiu.xyz/farm/java/${encodeURIComponent(farm.dn)}`;
+    const siteUrl = `https://theysix.tech/dn/${encodeURIComponent(farm.dn)}`;
     try {
       const { embed: dnEmbed, row } = await buildDnEmbed(farm, message.guild.id, message.author);
       await message.author.send({

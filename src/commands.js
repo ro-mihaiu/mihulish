@@ -2486,7 +2486,7 @@ add(farmCmd, "Farms", "Manager", async (i) => {
   });
 });
 
-const FARM_SITE = "https://theysix.ro-mihaiu.xyz/farm/java";
+const FARM_SITE = "https://theysix.tech/dn";
 const DN_COOLDOWN_MS = 2 * 60 * 1000;
 // Staff-role holders bypass the /dn cooldown entirely.
 const DN_STAFF_ROLE_ID = "1118591747472228482";
