@@ -289,6 +289,27 @@ async function checkTicketReminders() {
 
 setInterval(checkTicketReminders, TICKET_SWEEP_INTERVAL_MS);
 
+// Every 3 days, ping the bot owner in each guild's log channel so the bot
+// hosting (renewal) is not forgotten. The id is hard-coded: it is Mihaiu's.
+const BOT_RENEWAL_USER_ID = "1027052856697684099";
+const BOT_RENEWAL_INTERVAL_MS = 3 * 24 * 60 * 60 * 1000;
+setInterval(async () => {
+  for (const guild of client.guilds.cache.values()) {
+    const ch = await client.channels
+      .fetch(store.settings(guild.id)?.log_channel_id || "")
+      .catch(() => null);
+    if (!ch?.isTextBased()) continue;
+    try {
+      await ch.send({
+        content: `<@${BOT_RENEWAL_USER_ID}> don't forget to renew the bot — 3 days have passed.`,
+        allowedMentions: { users: [BOT_RENEWAL_USER_ID] },
+      });
+    } catch (e) {
+      console.error("[bot-renewal]", guild.id, e.message);
+    }
+  }
+}, BOT_RENEWAL_INTERVAL_MS);
+
 // Answer a button click with a short notice. Ephemeral follow-ups are not
 // accepted everywhere a farm embed can live (the DM channel `/dn` uses by
 // default), so a plain follow-up is the fallback rather than losing the reply.
