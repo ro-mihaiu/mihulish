@@ -1,0 +1,8 @@
+{
+  "date": "2026-10-31",
+  "version": "v1.15.9",
+  "changes": [
+    "Farm links now use the new format: `https://theysix.tech/dn/<dn>`. This applies everywhere links are shown — `/dn` embeds (here, DMs, DN channel), `m.dn`, and the DM-failure fallback text.",
+    "Added a recurring renewal reminder: every 3 days the bot pings Mihaiu in each server's log channel so the bot renewal is not forgotten."
+  ]
+}

@@ -1,10 +1,8 @@
 {
-  "date": "2026-10-26",
-  "version": "v1.15.8",
+  "date": "2026-10-31",
+  "version": "v1.15.9",
   "changes": [
-    "Added `/closerequest`: a ticket owner can request that their ticket be closed, providing a reason and an optional time limit (1-720 hours). When a staff member approves the request via the ✅/❌ buttons posted in the ticket, the ticket auto-closes once the limit elapses — or immediately if no limit is given.",
-    "Closure requests are stored in SQLite (`ticket_close_requests` table) with pending/approved/rejected/expired states; one pending request per ticket at a time.",
-    "A periodic sweep (running on the same 5-minute interval as the stale-ticket pings) expires approved requests whose limit has passed and closes the corresponding ticket, generating the transcript and closed-notice just like `/close`.",
-    "`/close` now accepts an optional `reason` argument. The reason is shown in the ticket's closed notice embed and in the log channel entry."
+    "Farm links now use the new format: `https://theysix.tech/dn/<dn>`. This applies everywhere links are shown — `/dn` embeds (here, DMs, DN channel), `m.dn`, and the DM-failure fallback text.",
+    "Added a recurring renewal reminder: every 3 days the bot pings Mihaiu in each server's log channel so the bot renewal is not forgotten."
   ]
 }
