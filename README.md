@@ -67,4 +67,4 @@ DM the bot to start modmail. It asks you to choose a type, then collects that ty
 
 Closing modmail saves an HTML transcript in the configured transcript channel and a full local JSON record at `data/modmail-transcripts/<channel-id>.json`. `data/modmail-transcripts/corpus.jsonl` combines those records for later review. The directory is excluded from Git. Automatic learning considers Java, Bedrock, and bug reports; `/learn review` approves a candidate into a local Markdown draft under `data/wiki-drafts/` for a human to verify and publish. Approval does not publish a wiki page.
 
-`/rules` posts the rules overview with the official links and a dropdown. Selecting one rule returns its embed to the person who selected it. `/wiki article` searches the current TheySix wiki domain and Minecraft Wiki.
+`/rules` or `m.rules` posts the rules overview with official links, a dropdown, and a View All Rules button. Selecting one rule returns its embed privately; View All sends the complete list privately. `m.rule <number>` shows one rule, and `/faq` or `m.faq` shows the FAQ. `/wiki article` searches the current TheySix wiki domain and Minecraft Wiki.

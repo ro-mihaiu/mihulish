@@ -39,6 +39,8 @@ const {
   buildLearningReviewEmbed,
 } = require("./commands");
 const { fetchVideoTitle, searchWikis } = require("./utils");
+const { overview: rulesOverview, ruleEmbed, rules } = require("./rules");
+const { faqPayload } = require("./faq");
 
 const DEFAULT_PREFIX = "m.";
 
@@ -60,7 +62,7 @@ function parsePrefixMessage(message) {
 function reply(message, payload) {
   const options = typeof payload === "string" ? { content: payload } : { ...payload };
   if (options.components) {
-    options.embeds = options.components.filter((component) => component.data?.title);
+    options.embeds = [...(options.embeds || []), ...options.components.filter((component) => component.data?.title)];
     options.components = options.components.filter((component) => !component.data?.title);
     if (!options.components.length) delete options.components;
   }
@@ -195,6 +197,18 @@ async function handlePrefixMessage(message) {
   if (command.name === "update") {
     return reply(message, { embeds: buildUpdateEmbed() });
   }
+  if (command.name === "rules") {
+    if (!message.member?.permissions.has(PermissionFlagsBits.ManageMessages) && !isBotOwner(message.author.id, message.client))
+      return reply(message, "You need Manage Messages to post the rules.");
+    return reply(message, rulesOverview());
+  }
+  if (command.name === "rule") {
+    const index = Number(command.arguments[0]) - 1;
+    if (!Number.isInteger(index) || index < 0 || index >= rules.length)
+      return reply(message, `Usage: \`${p}rule <1-${rules.length}>\``);
+    return reply(message, { embeds: [ruleEmbed(index)] });
+  }
+  if (command.name === "faq") return reply(message, faqPayload());
 
   if (command.name === "prefix") {
     return reply(

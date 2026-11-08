@@ -842,8 +842,8 @@ async function closeTicket(interaction, { viaCommand = false, reason = null } = 
   });
 
   if (t.dm_only && t.ticket_user_id) {
-    const owner = await interaction.client?.users.fetch(t.ticket_user_id).catch(() => null);
-    await owner?.send(`Your **${panelLabel(t.panel)}** modmail has been closed.${reason ? ` Reason: ${reason}` : ""} DM me again to open a new conversation.`).catch(() => {});
+    const owner = interaction.client ? await interaction.client.users.fetch(t.ticket_user_id).catch(() => null) : null;
+    if (owner) await owner.send(`Your **${panelLabel(t.panel)}** modmail has been closed.${reason ? ` Reason: ${reason}` : ""} DM me again to open a new conversation.`).catch(() => {});
     dmActiveTickets.delete(t.ticket_user_id);
   }
 
