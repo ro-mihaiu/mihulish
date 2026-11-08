@@ -1,0 +1,10 @@
+{
+  "date": "2026-11-08",
+  "version": "v1.16.2",
+  "changes": [
+    "Added View All Rules to `/rules`, sending the complete rule list privately in grouped embeds. Individual rules remain available from the dropdown.",
+    "Open modmail now reacts with 📬 when a member sends a message. Bot messages do not trigger the reaction.",
+    "Added `/faq` with answers about farm downloads, troubleshooting, community access, support, active staff, and retired staff.",
+    "Added Report with Mihulish to the message right-click menu. It opens private Report User modmail with the selected message as evidence, or adds it to an existing open report."
+  ]
+}

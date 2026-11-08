@@ -9,12 +9,14 @@ const {
   TextInputBuilder,
   TextInputStyle,
   MessageFlags,
+  ContextMenuCommandBuilder,
+  ApplicationCommandType,
 } = require("discord.js");
 const fs = require("fs");
 const path = require("path");
 const { AttachmentBuilder } = require("discord.js");
 const store = require("./database");
-const { runPanelCommand, runCloseCommand, openTicket, reopenTicket, deleteTicket, claimTicket, PANEL_QUESTIONS, AUTO_ASSIGN_RULES } = require("./tickets");
+const { runPanelCommand, runCloseCommand, openTicket, reopenTicket, deleteTicket, claimTicket, reportMessage, PANEL_QUESTIONS, AUTO_ASSIGN_RULES } = require("./tickets");
 const { makeEmbed, logCommand, logEvent, logModeration, sendDM, fetchVideoTitle, resolveThumbnail, searchWikis } = require("./utils");
 const COLOR = 0xe91e63;
 const DOCS = "https://mihulish.ro-mihaiu.xyz";
@@ -369,6 +371,13 @@ add(
   "Everyone",
   (i) => respond(i, { embeds: buildUpdateEmbed() }),
 );
+add(
+  new SlashCommandBuilder().setName("faq").setDescription("Common TheySix questions and staff links"),
+  "Utility", "Everyone",
+  (i) => respond(i, require("./faq").faqPayload()),
+);
+add(new ContextMenuCommandBuilder().setName("Report with Mihulish").setType(ApplicationCommandType.Message),
+  "Moderation", "Everyone", reportMessage);
 const invite = new SlashCommandBuilder()
   .setName("invite")
   .setDescription("Get the bot invite link");

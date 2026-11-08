@@ -31,6 +31,7 @@ const CLOSE_CUSTOM_ID = "ticket_close";
 const REOPEN_CUSTOM_ID = "ticket_reopen";
 const DELETE_CUSTOM_ID = "ticket_delete";
 const CLAIM_CUSTOM_ID = "ticket_claim";
+const REPORT_MESSAGE_CUSTOM_ID = "ticket_report_message";
 
 // Tracks the panel message a user last interacted with, so the modal-submit
 // handler can reset the select menu after the form is filled in. A user can
@@ -443,7 +444,42 @@ async function openTicket(interaction, panel) {
   return createTicket(interaction, panel);
 }
 
-async function createTicket(interaction, panel, answers) {
+async function reportMessage(interaction) {
+  const message = interaction.targetMessage;
+  if (!message || !interaction.guildId) return notice(interaction, "Choose a server message to report.");
+  if (message.author?.id === interaction.user.id) return notice(interaction, "You cannot report your own message.");
+  if (!supportCategoryId(interaction.guildId) || !store.listTicketPanels(interaction.guildId).some((p) => p.panel === "report" && p.enabled))
+    return notice(interaction, "Report User modmail is currently unavailable.");
+  const modal = new ModalBuilder()
+    .setCustomId(`${REPORT_MESSAGE_CUSTOM_ID}|${message.channelId}|${message.id}|${message.author.id}`)
+    .setTitle("Report this message")
+    .addComponents(
+      new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId("reason").setLabel("Why are you reporting this message?").setStyle(TextInputStyle.Paragraph).setRequired(true).setMaxLength(1000)),
+      new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId("context").setLabel("Additional context (optional)").setStyle(TextInputStyle.Paragraph).setRequired(false).setMaxLength(1000)),
+    );
+  return interaction.showModal(modal);
+}
+
+async function submitMessageReport(interaction) {
+  const [, sourceChannelId, messageId, authorId] = interaction.customId.split("|");
+  const sourceChannel = await interaction.guild.channels.fetch(sourceChannelId).catch(() => null);
+  const target = await sourceChannel?.messages?.fetch(messageId).catch(() => null);
+  const url = `https://discord.com/channels/${interaction.guildId}/${sourceChannelId}/${messageId}`;
+  const reason = interaction.fields.getTextInputValue("reason");
+  const context = interaction.fields.getTextInputValue("context") || "Not supplied";
+  const evidence = `**Reported message:** [Jump to message](${url})\n**Author:** <@${authorId}>\n**Content:** ${target?.content?.slice(0, 1200) || "(message unavailable or no text)"}\n**Attachments:** ${target?.attachments?.map((a) => a.url).join(" ") || "None"}`;
+  const existing = store.db.prepare("SELECT channel_id FROM tickets WHERE guild_id=? AND panel='report' AND ticket_user_id=? AND status='OPEN'")
+    .get(interaction.guildId, interaction.user.id);
+  const existingChannel = existing && await interaction.guild.channels.fetch(existing.channel_id).catch(() => null);
+  if (existingChannel) {
+    await interaction.deferReply({ flags: 64 });
+    await existingChannel.send({ embeds: [embed("Additional reported message", `${evidence}\n\n**Reason:** ${reason}\n**Context:** ${context}`.slice(0, 4000))], allowedMentions: { parse: [] } });
+    return interaction.editReply({ content: `Added this message to your open report: <#${existingChannel.id}>` });
+  }
+  return createTicket(interaction, "report", [authorId, reason, target?.createdAt?.toISOString() || "Unknown", url, context], evidence);
+}
+
+async function createTicket(interaction, panel, answers, evidence = null) {
   const guild = interaction.guild;
   const categoryId = supportCategoryId(guild.id);
   if (!categoryId) {
@@ -584,6 +620,7 @@ async function createTicket(interaction, panel, answers) {
         .filter(Boolean)
         .join("\n\n") + "\n\n";
   }
+  if (evidence) description += `**Message evidence**\n${evidence}\n\n`;
   // Farm tickets accept an optional schematic file — modals only hold five
   // fields, so the file itself is attached in the ticket instead.
   if (panel === "java" || panel === "br") {
@@ -935,6 +972,10 @@ function notice(interaction, text) {
 // the interaction belonged to the ticket system.
 async function handleTicketInteraction(interaction) {
   if (!interaction.guildId) return false;
+  if (interaction.isModalSubmit() && interaction.customId.startsWith(`${REPORT_MESSAGE_CUSTOM_ID}|`)) {
+    await submitMessageReport(interaction);
+    return true;
+  }
 
   // Select-menu picks on the Components V2 panel.
   if (interaction.isStringSelectMenu() && interaction.customId === PANEL_SELECT_CUSTOM_ID) {
@@ -1190,6 +1231,7 @@ async function processExpiredCloseRequests(client) {
 }
 
 module.exports = {
+  reportMessage,
   openTicket,
   closeTicket,
   reopenTicket,

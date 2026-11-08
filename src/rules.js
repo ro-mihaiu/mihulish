@@ -30,10 +30,11 @@ function overview() {
     .addOptions(rules.map(([title], i) => ({ label: `Rule ${i + 1} — ${title}`, value: String(i) })));
   return {
     embeds: [new EmbedBuilder().setColor(0x5865f2).setTitle("📜 TheySix | Community Rules & Guidelines")
-      .setDescription("Welcome to the TheySix community. Choose a rule below to read it on its own. These rules cover everyone in the server. Read the full rules and welcome guide for the complete current guidance.\n\n**Be respectful. Share responsibly. Keep support useful.**\n\n> The rules are not fixed, and may be updated at any time. Check the pinned messages in <#995779585339822090> for the latest version.")
-      .addFields({ name: "TheySix | Minecraft - Official policies", value: "[Terms](https://wiki.theysix.tech/legal/terms)) · [Privacy](https://wiki.theysix.tech/legal/privacy) · [Cookies](https://wiki.theysix.tech/legal/cookies)" })],
+      .setDescription("Welcome to the TheySix community!\n\nTheySix is a place to share Minecraft farms, learn from other builders, and help each other improve. To keep the community safe and useful, everyone is expected to follow these rules.\n\nSelect a guideline below, or press **View All Rules** to read every rule privately. By participating, you agree to these rules and any channel-specific instructions.\n\nThank you for helping make TheySix welcoming for everyone!\n\nhttps://discord.gg/theysix")
+      .addFields({ name: "Official policies", value: "[Terms](https://wiki.theysix.tech/legal/terms) · [Privacy](https://wiki.theysix.tech/legal/privacy) · [Cookies](https://wiki.theysix.tech/legal/cookies)" })],
     components: [
       new ActionRowBuilder().addComponents(menu),
+      new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId("theysix_rules_all").setLabel("View All Rules").setStyle(ButtonStyle.Primary)),
       new ActionRowBuilder().addComponents(link("Full Rules", RULES_URL), link("Welcome Guide", WELCOME_URL), link("Support Guide", "https://wiki.theysix.tech/w/discord/using-theysix-support")),
       new ActionRowBuilder().addComponents(link("Discord Terms", "https://discord.com/terms"), link("Discord Privacy", "https://discord.com/privacy"), link("Discord Guidelines", "https://discord.com/guidelines")),
       new ActionRowBuilder().addComponents(link("Minecraft EULA", "https://www.minecraft.net/eula"), link("Minecraft Guidelines", "https://www.minecraft.net/usage-guidelines")),
@@ -42,6 +43,11 @@ function overview() {
   };
 }
 async function handleRulesSelect(interaction) {
+  if (interaction.isButton() && interaction.customId === "theysix_rules_all") {
+    await interaction.reply({ embeds: rules.slice(0, 9).map((_, i) => ruleEmbed(i)), ephemeral: true });
+    await interaction.followUp({ embeds: [...rules.slice(9).map((_, i) => ruleEmbed(i + 9)), new EmbedBuilder().setColor(0x5865f2).setTitle("✨ Our Community Commitment").setDescription("Create freely. Share responsibly. Respect others.\n\nRead the [full TheySix rules](https://wiki.theysix.tech/w/discord/theysix-discord-rules) and [welcome guide](https://wiki.theysix.tech/w/discord/welcome-to-theysix-discord).\n\nhttps://discord.gg/theysix")], ephemeral: true });
+    return true;
+  }
   if (!interaction.isStringSelectMenu() || interaction.customId !== "theysix_rules_select") return false;
   const index = Number(interaction.values[0]);
   if (!Number.isInteger(index) || index < 0 || index >= rules.length) return false;

@@ -264,6 +264,7 @@ client.on(Events.MessageCreate, async (message) => {
   const ticket = store.ticket(message.guild.id, message.channel.id);
   if (ticket && ticket.status === "OPEN") {
     store.updateTicketLastMessage(message.guild.id, message.channel.id);
+    await message.react("📬").catch((e) => console.error("[modmail] reaction:", e.message));
   }
 });
 
@@ -383,10 +384,10 @@ client.on(Events.InteractionCreate, async (i) => {
 });
 
 client.on(Events.InteractionCreate, async (i) => {
-  if (!i.isChatInputCommand() || !i.guildId) return;
+  if ((!i.isChatInputCommand() && !i.isMessageContextMenuCommand()) || !i.guildId) return;
   const command = commands.find((c) => c.data.name === i.commandName);
   if (!command) return;
-  if (!(i.commandName === "ticket" && i.options.getSubcommand(false) === "create")) {
+  if (!i.isMessageContextMenuCommand() && !(i.commandName === "ticket" && i.options.getSubcommand(false) === "create")) {
     try {
       await i.deferReply();
     } catch (e) {
@@ -419,9 +420,7 @@ client.on(Events.InteractionCreate, async (i) => {
     // Also surface the stack on the console so a container log shows exactly
     // which line failed without needing to pull the log file.
     console.error(e.stack || e);
-    await i.editReply({
-      content: "Mihulish could not complete that request.",
-    }).catch(() => {});
+    await (i.deferred ? i.editReply({ content: "Mihulish could not complete that request." }) : i.reply({ content: "Mihulish could not complete that request.", ephemeral: true })).catch(() => {});
   }
 });
 
