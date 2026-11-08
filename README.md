@@ -61,4 +61,8 @@ Discord permissions are declared on moderation commands and checked again at exe
 
 ## Ticket policy
 
-`/claim` and `/transfer` will notify the ticket creator and the claiming/receiving staff member using direct mentions, not an embed. TT.BOT API access is not required for channel recognition. No undocumented TT.BOT behavior is used.
+`/ticket create type:<type>` opens a private modmail channel. Available types are Java, Bedrock, Report User, Report Bug, Partnership, Management, and Staff Apply. Managers can enable or disable new conversations per type with `/ticket availability type:<type> state:on|off` (all types start on). Staff can use `/ticket claim`, `/ticket transfer`, `/ticket close`, `/ticket reopen`, and `/ticket delete` inside a modmail channel. `/ticket ping state:on|off` controls inactivity pings for that channel; `/ticket ping hours:<number>` runs the stale conversation check. The original `/claim`, `/transfer`, `/close`, and `/panel` commands remain available.
+
+Closing modmail saves an HTML transcript in the configured transcript channel and a full local JSON record at `data/modmail-transcripts/<channel-id>.json`. `data/modmail-transcripts/corpus.jsonl` combines those records for later review. The directory is excluded from Git. Automatic learning considers Java, Bedrock, and bug reports; `/learn review` approves a candidate into a local Markdown draft under `data/wiki-drafts/` for a human to verify and publish. Approval does not publish a wiki page.
+
+`/rules` posts the rules overview with the official links and a dropdown. Selecting one rule returns its embed to the person who selected it. `/wiki article` searches the current TheySix wiki domain and Minecraft Wiki.

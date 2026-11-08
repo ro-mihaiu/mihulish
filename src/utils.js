@@ -199,20 +199,31 @@ async function resolveThumbnail(url) {
 // `/wiki article:<keyword>` searches the TheySix wiki and minecraft.wiki.
 // The TheySix wiki has no search API, so the article list comes from its
 // sitemap.xml (cached for an hour) and matches on the URL slug.
-const WIKI_SITEMAP_URL = "https://wiki-theysix.ro-mihaiu.xyz/sitemap.xml";
+const WIKI_BASE_URL = "https://wiki.theysix.tech";
+const WIKI_SITEMAP_URL = `${WIKI_BASE_URL}/sitemap.xml`;
 const WIKI_USER_AGENT = "Mozilla/5.0 (compatible; Mihulish bot)";
 let wikiIndexCache = { at: 0, pages: [] };
 async function theysixWikiIndex() {
   if (wikiIndexCache.pages.length && Date.now() - wikiIndexCache.at < 60 * 60 * 1000)
     return wikiIndexCache.pages;
-  const res = await fetch(WIKI_SITEMAP_URL, {
-    headers: { "user-agent": WIKI_USER_AGENT },
-    signal: AbortSignal.timeout(8000),
-  });
-  if (!res.ok) throw new Error(`sitemap fetch failed (${res.status})`);
-  const pages = [...(await res.text()).matchAll(/<loc>([^<]+)<\/loc>/g)]
-    .map((m) => m[1])
-    .filter((u) => u.includes("/w/"));
+  const urls = [WIKI_SITEMAP_URL, `${WIKI_BASE_URL}/w`];
+  const fetched = await Promise.allSettled(urls.map(async (url) => {
+    const res = await fetch(url, { headers: { "user-agent": WIKI_USER_AGENT }, signal: AbortSignal.timeout(8000) });
+    if (!res.ok) throw new Error(`wiki index fetch failed (${res.status})`);
+    return res.text();
+  }));
+  const pages = [...new Set(fetched.flatMap((result) => {
+    if (result.status !== "fulfilled") return [];
+    const source = result.value;
+    return [
+      ...[...source.matchAll(/<loc>([^<]+)<\/loc>/g)].map((m) => m[1]),
+      ...[...source.matchAll(/href=["']([^"']*\/w\/[^"'#?]+)["']/g)].map((m) => m[1]),
+    ];
+  }).map((raw) => {
+    try { return new URL(new URL(raw, WIKI_BASE_URL).pathname, WIKI_BASE_URL).href; }
+    catch { return null; }
+  }).filter((u) => u?.includes("/w/")))];
+  if (!pages.length) throw new Error("TheySix wiki index unavailable");
   if (pages.length) wikiIndexCache = { at: Date.now(), pages };
   return pages;
 }
@@ -226,10 +237,8 @@ function scoreWikiSlug(slug, words, joined) {
 }
 function fetchWikiMeta(url) {
   // Best-effort: fall back to a humanised slug when the page can't be read.
-  const fallback = (url.split("/w/")[1] || "").split("-").join(" ");
-  // The wiki lives on wiki-theysix.ro-mihaiu.xyz; article URLs in the sitemap
-  // use the apex domain which 404s, so read the page from the wiki host.
-  const metaUrl = url.replace("//theysix.ro-mihaiu.xyz/", "//wiki-theysix.ro-mihaiu.xyz/");
+  const fallback = (url.split("/w/")[1] || "").split("/").pop().split("-").join(" ");
+  const metaUrl = url;
   return (async () => {
     const res = await fetch(metaUrl, {
       headers: { "user-agent": WIKI_USER_AGENT },
@@ -242,7 +251,7 @@ function fetchWikiMeta(url) {
       /<meta[^>]+name=["']description["'][^>]+content=["']([^"']+)["']/i.exec(html) ||
       /<meta[^>]+content=["']([^"']+)["'][^>]+name=["']description["']/i.exec(html);
     return {
-      title: t ? t[1].replace(/\s*\|\s*TheySix Wiki\s*$/i, "").trim() : fallback,
+      title: t ? t[1].replace(/\s*\|\s*(?:Wiki\s*-\s*)?TheySix Wiki\s*$/i, "").trim() : fallback,
       description: d ? d[1].trim() : null,
     };
   })().catch(() => ({ title: fallback, description: null }));
@@ -262,8 +271,7 @@ async function searchTheySixWiki(query, limit = 3) {
   return Promise.all(
     hits.map(async (h) => {
       const { title, description } = await fetchWikiMeta(h.url);
-      const displayUrl = h.url.replace("//theysix.ro-mihaiu.xyz/", "//wiki-theysix.ro-mihaiu.xyz/");
-      return { source: "TheySix Wiki", title, url: displayUrl, description };
+      return { source: "TheySix Wiki", title, url: h.url, description };
     }),
   );
 }

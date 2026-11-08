@@ -1,6 +1,8 @@
 .env
 data/*.db
 data/*.db-*
+data/modmail-transcripts/
+data/wiki-drafts/
 data_old/**
 data_old/
 node_modules/

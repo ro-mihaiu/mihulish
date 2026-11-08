@@ -20,11 +20,13 @@ const { EmbedBuilder,
 } = require("discord.js");
 const store = require("./database");
 const { sendDM } = require("./utils");
+const fs = require("node:fs");
+const path = require("node:path");
 
 const PANEL_CUSTOM_ID = "ticket_open";
 const PANEL_SELECT_CUSTOM_ID = "ticket_open_select";
 const MODAL_CUSTOM_ID = "ticket_modal";
-const WIKI_URL = "https://wiki-theysix.ro-mihaiu.xyz/w/how-to-complete-a-ticket";
+const WIKI_URL = "https://wiki.theysix.tech/w/discord/using-theysix-support";
 const CLOSE_CUSTOM_ID = "ticket_close";
 const REOPEN_CUSTOM_ID = "ticket_reopen";
 const DELETE_CUSTOM_ID = "ticket_delete";
@@ -61,6 +63,12 @@ function supportCategoryId(guildId) {
 function ticketRowForChannel(guildId, channelId) {
   return store.ticket(guildId, channelId);
 }
+function canManageTicket(interaction) {
+  const managerRole = store.settings(interaction.guildId || interaction.guild.id)?.manager_role_id;
+  return store.isStaff(interaction.guildId || interaction.guild.id, interaction.user.id) ||
+    interaction.memberPermissions?.has(PermissionFlagsBits.ManageChannels) ||
+    (managerRole && interaction.member?.roles?.cache?.has(managerRole));
+}
 
 function ticketControls(closed, { claimed = false, canClaim = true } = {}) {
   const row = new ActionRowBuilder();
@@ -68,7 +76,7 @@ function ticketControls(closed, { claimed = false, canClaim = true } = {}) {
     row.addComponents(
       new ButtonBuilder()
         .setCustomId(REOPEN_CUSTOM_ID)
-        .setLabel("Reopen ticket")
+        .setLabel("Reopen modmail")
         .setEmoji("🔓")
         .setStyle(ButtonStyle.Success),
     );
@@ -76,7 +84,7 @@ function ticketControls(closed, { claimed = false, canClaim = true } = {}) {
     row.addComponents(
       new ButtonBuilder()
         .setCustomId(CLAIM_CUSTOM_ID)
-        .setLabel(claimed ? "Claimed" : "Claim ticket")
+        .setLabel(claimed ? "Claimed" : "Claim modmail")
         .setEmoji("🙋")
         .setStyle(claimed ? ButtonStyle.Success : ButtonStyle.Primary)
         .setDisabled(claimed),
@@ -85,14 +93,14 @@ function ticketControls(closed, { claimed = false, canClaim = true } = {}) {
   row.addComponents(
     new ButtonBuilder()
       .setCustomId(CLOSE_CUSTOM_ID)
-      .setLabel("Close ticket")
+      .setLabel("Close modmail")
       .setEmoji("🔒")
       .setStyle(ButtonStyle.Secondary),
   );
   row.addComponents(
     new ButtonBuilder()
       .setCustomId(DELETE_CUSTOM_ID)
-      .setLabel("Delete ticket")
+      .setLabel("Delete modmail")
       .setEmoji("🗑️")
       .setStyle(ButtonStyle.Danger),
   );
@@ -158,6 +166,11 @@ const PANEL_META = {
     info: "Please explain the management request or concern and provide any relevant context. Management team will follow up.",
     note: "Provide clear context, reasons, and any supporting evidence for management to review.",
   },
+  "staff-apply": {
+    label: "Staff Apply", emoji: "📝", description: "Apply to join the staff team",
+    info: "Tell us about your experience, availability, and why you want to help TheySix.",
+    note: "Management will review your application privately.",
+  },
 };
 
 // Required questions per ticket type. Every question is mandatory — the modal
@@ -211,6 +224,11 @@ const PANEL_QUESTIONS = {
     "Supporting evidence or context",
     "What outcome are you asking for?",
   ],
+  "staff-apply": [
+    "What role are you applying for?", "What relevant experience do you have?",
+    "Why do you want to join our staff?", "How many hours can you help each week?",
+    "What is your time zone?",
+  ],
 };
 
 // Keyword rules for automatic staff assignment. Each rule matches on the panel
@@ -223,6 +241,7 @@ const AUTO_ASSIGN_RULES = [
   { tag: "report", panels: ["report"], keywords: ["grief", "steal", "hacks", "cheat", "xray", "harass", "ban", "reported"] },
   { tag: "partnership", panels: ["partnership"], keywords: ["discord", "youtube", "tiktok", "collab", "subscriber", "views"] },
   { tag: "management", panels: ["management"], keywords: ["staff", "appeal", "unban", "refund", "complaint", "management"] },
+  { tag: "management", panels: ["staff-apply"], keywords: ["apply", "application", "staff"] },
 ];
 
 // Auto-assigns the ticket to the best-matching staff member based on the
@@ -291,10 +310,10 @@ function buildPanelPayload(panels) {
   const divider = (spacing = 1) => ({ type: 14, divider: true, spacing });
 
   const welcome = text(
-    "🎫 **TheySix Support System**\n\n" +
-    "Welcome to TheySix Support, here to help you with any issues or requests you may have while playing on our server. " +
+    "📨 **TheySix Modmail & Support**\n\n" +
+    "Welcome to TheySix Support. Each request opens a private conversation with the relevant staff team. " +
     "Please select the ticket type that best matches your situation.\n\n" +
-    "⚠️ **Don't create tickets for fun or just to test the system.**\n" +
+    "⚠️ **Don't open modmail for fun or just to test the system.**\n" +
     "Misuse of the ticket system may result in moderation action.",
   );
   const blocks = [];
@@ -447,7 +466,7 @@ async function createTicket(interaction, panel, answers) {
       return notice(interaction, `You already have an open **${panel}** ticket: <#${found.id}>.`);
   }
 
-  await interaction.deferReply({ flags: 64 }); // ephemeral
+  if (!interaction.deferred && !interaction.replied) await interaction.deferReply({ flags: 64 }); // ephemeral
 
   const channelName = `${panel}-${interaction.user.username}`.toLowerCase().replace(/[^a-z0-9-]/g, "");
   const everyone = guild.roles.everyone;
@@ -473,8 +492,8 @@ async function createTicket(interaction, panel, answers) {
     },
   ];
   // Staff configured in the bot (or managers) can see every ticket.
-  const staffOverwrites = store
-    .listStaff(guild.id)
+  const restricted = ["report", "bug", "partnership", "management", "staff-apply"].includes(panel);
+  const staffOverwrites = (restricted ? [] : store.listStaff(guild.id))
     .map((s) => ({
       id: s.user_id,
       allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory],
@@ -497,6 +516,7 @@ async function createTicket(interaction, panel, answers) {
     report: s.mod_role_id,
     partnership: s.manager_role_id,
     management: s.manager_role_id,
+    "staff-apply": s.manager_role_id,
   };
   const panelRoleId = roleVisibility[panel];
   if (panelRoleId) {
@@ -536,7 +556,7 @@ async function createTicket(interaction, panel, answers) {
   // Auto-assign the ticket to the staff member whose expertise best matches
   // the answers (DN, video link, problem description). The ticket creator is
   // never considered — they are not staff and should not be pinged.
-  const autoAssigned = autoAssignStaff(guild, panel, answers, interaction.user.id);
+  const autoAssigned = restricted ? null : autoAssignStaff(guild, panel, answers, interaction.user.id);
   if (autoAssigned) {
     store.assignTicket(guild.id, channel.id, autoAssigned);
     sendDM(
@@ -569,9 +589,9 @@ async function createTicket(interaction, panel, answers) {
   if (panel === "java" || panel === "br") {
     description += `📎 **Schematic file (optional):** if you have a schematic, attach it as a file in this ticket.\n\n`;
   }
-  description += `Use **Close ticket** below once your issue is resolved.`;
-  const created = embed(`📩 ${panel} ticket`, description.slice(0, 4000));
-  created.setFooter({ text: `Mihulish | Ticket System · #${panel}${autoAssigned ? " · auto-assigned" : ""}` });
+  description += `Ask staff to close this modmail once your issue is resolved.`;
+  const created = embed(`📩 ${panelLabel(panel)} modmail`, description.slice(0, 4000));
+  created.setFooter({ text: `Mihulish | Modmail · #${panel}${autoAssigned ? " · auto-assigned" : ""}` });
   await channel.send({
     content: autoAssigned ? `<@${autoAssigned}>` : undefined,
     embeds: [created],
@@ -587,7 +607,7 @@ async function createTicket(interaction, panel, answers) {
   });
 
   return interaction.editReply({
-    content: `Your **${panel}** ticket has been created: <#${channel.id}>`,
+    content: `Your **${panelLabel(panel)}** modmail is open: <#${channel.id}>`,
   });
 }
 
@@ -597,7 +617,7 @@ async function createTicket(interaction, panel, answers) {
 // message buttons so the claim is visible to everyone in the channel.
 async function claimTicket(interaction) {
   const guild = interaction.guild;
-  if (!store.isStaff(guild.id, interaction.user.id) && !interaction.memberPermissions?.has(PermissionFlagsBits.ManageChannels)) {
+  if (!canManageTicket(interaction)) {
     return notice(interaction, "Only staff can claim a ticket.");
   }
   const t = ticketRowForChannel(guild.id, interaction.channelId);
@@ -641,17 +661,22 @@ async function closeTicket(interaction, { viaCommand = false, reason = null } = 
   // Closing is a staff action; the ticket owner asks staff or uses the claim.
   if (
     !viaCommand &&
-    !store.isStaff(guild.id, interaction.user.id) &&
-    !interaction.memberPermissions?.has(PermissionFlagsBits.ManageChannels)
+    !canManageTicket(interaction)
   ) {
     return notice(interaction, "Only staff can close a ticket.");
   }
-  if (!viaCommand) await interaction.deferReply({ flags: 64 });
+  if (!viaCommand && !interaction.deferred && !interaction.replied) await interaction.deferReply({ flags: 64 });
 
   await generateAndPostTranscript(guild, interaction.channel, t, "closed", interaction.user);
+  if (["java", "br", "bug"].includes(t.panel)) {
+    const { learnFromClosedTicket, isLearningEnabled } = require("./ticket-learning");
+    if (isLearningEnabled(guild.id))
+      await learnFromClosedTicket(guild, interaction.channel, t).catch((e) => console.error("[tickets] learning:", e.message));
+  }
 
   // Rename with the closed- prefix — the ChannelUpdate handler in index.js
   // will mark the ticket CLOSED and strip the claim automatically.
+  store.saveTicket(guild.id, interaction.channelId, t.panel, t.ticket_user_id, "CLOSED");
   try {
     await interaction.channel.setName(`closed-${interaction.channel.name}`, `Closed by ${interaction.user.tag}`);
   } catch {
@@ -660,13 +685,13 @@ async function closeTicket(interaction, { viaCommand = false, reason = null } = 
   }
 
   const reply = embed(
-    "Ticket closed",
+    "Modmail closed",
     `This ticket has been closed by <@${interaction.user.id}>.${
       reason ? `\n**Reason:** ${reason}` : ""
     }\n` +
     `Staff can reopen or delete it below.`,
   );
-  reply.setFooter({ text: "Mihulish | Ticket System" });
+  reply.setFooter({ text: "Mihulish | Modmail" });
   // Staff can reopen the ticket from this closed notice (the original welcome
   // message's controls are also still available, but this gives staff a
   // second entry point right next to the transcript).
@@ -676,7 +701,7 @@ async function closeTicket(interaction, { viaCommand = false, reason = null } = 
       new ActionRowBuilder().addComponents(
         new ButtonBuilder()
           .setCustomId(REOPEN_CUSTOM_ID)
-          .setLabel("Reopen ticket")
+          .setLabel("Reopen modmail")
           .setEmoji("🔓")
           .setStyle(ButtonStyle.Success),
       ),
@@ -692,7 +717,7 @@ async function closeTicket(interaction, { viaCommand = false, reason = null } = 
     ],
   });
 
-  if (!viaCommand) await interaction.editReply({ content: "Ticket closed." });
+  if (!viaCommand) await interaction.editReply({ content: "Modmail closed." });
   return { ok: true };
 }
 
@@ -703,17 +728,17 @@ async function reopenTicket(interaction) {
   const t = ticketRowForChannel(guild.id, interaction.channelId);
   if (!t || t.status !== "CLOSED") return notice(interaction, "This ticket is not closed.");
 
-  if (!interaction.memberPermissions.has(PermissionFlagsBits.ManageChannels) && !store.isStaff(guild.id, interaction.user.id))
+  if (!canManageTicket(interaction))
     return notice(interaction, "Only staff can reopen a ticket.");
 
-  await interaction.deferReply({ flags: 64 });
+  if (!interaction.deferred && !interaction.replied) await interaction.deferReply({ flags: 64 });
   try {
     const name = interaction.channel.name.replace(/^closed-/, "");
     await interaction.channel.setName(name, `Reopened by ${interaction.user.tag}`);
   } catch {
     store.saveTicket(guild.id, interaction.channelId, t.panel, t.ticket_user_id, "OPEN");
   }
-  await interaction.editReply({ content: "Ticket reopened." });
+  await interaction.editReply({ content: "Modmail reopened." });
   await logToChannel(guild, {
     embeds: [embed("Ticket reopened", `**${t.panel}** ticket <#${interaction.channelId}> reopened by <@${interaction.user.id}>`)],
   });
@@ -725,14 +750,14 @@ async function deleteTicket(interaction) {
   const guild = interaction.guild;
   const t = ticketRowForChannel(guild.id, interaction.channelId);
   if (!t) return notice(interaction, "This is not a recognized ticket.");
-  if (!interaction.memberPermissions?.has(PermissionFlagsBits.ManageChannels) && !store.isStaff(guild.id, interaction.user.id))
+  if (!canManageTicket(interaction))
     return notice(interaction, "Only staff can delete a ticket.");
   // Tickets must be closed before they can be deleted, so a transcript always
   // exists first.
   if (t.status !== "CLOSED")
     return notice(interaction, "Close the ticket first — tickets can only be deleted once closed.");
 
-  await interaction.deferReply({ flags: 64 });
+  if (!interaction.deferred && !interaction.replied) await interaction.deferReply({ flags: 64 });
 
   // The transcript was already generated when the ticket was closed.
   // Deleting just logs the action and removes the channel.
@@ -757,7 +782,7 @@ async function generateAndPostTranscript(guild, channel, ticketRow, status, acto
   let messages = [];
   try {
     let lastId;
-    for (let round = 0; round < 20; round++) {
+    for (let round = 0; round < 100; round++) {
       const batch = await channel.messages.fetch({
         limit: 100,
         before: lastId,
@@ -772,6 +797,30 @@ async function generateAndPostTranscript(guild, channel, ticketRow, status, acto
     // Fall through with whatever we managed to fetch.
   }
   messages.reverse();
+
+  // Keep one complete local record per conversation and regenerate the combined
+  // JSONL corpus, so reopening and closing a conversation does not duplicate it.
+  try {
+    const dir = path.resolve(process.env.MODMAIL_TRANSCRIPT_DIR || "./data/modmail-transcripts");
+    fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+    const record = {
+      guildId: guild.id, channelId: channel.id, ticketId: ticketRow.id,
+      type: ticketRow.panel, ownerId: ticketRow.ticket_user_id,
+      createdAt: ticketRow.created_at, closedAt: Date.now(),
+      messages: messages.map((m) => ({
+        id: m.id, authorId: m.author?.id, author: m.author?.tag,
+        at: m.createdTimestamp, content: m.content,
+        attachments: [...m.attachments.values()].map((a) => ({ name: a.name, url: a.url })),
+      })),
+    };
+    fs.writeFileSync(path.join(dir, `${channel.id}.json`), JSON.stringify(record, null, 2), { mode: 0o600 });
+    const combined = fs.readdirSync(dir).filter((name) => name.endsWith(".json"))
+      .map((name) => JSON.stringify(JSON.parse(fs.readFileSync(path.join(dir, name), "utf8"))))
+      .join("\n");
+    fs.writeFileSync(path.join(dir, "corpus.jsonl"), combined + "\n", { mode: 0o600 });
+  } catch (e) {
+    console.error("[tickets] local transcript:", e.message);
+  }
 
   const html = renderTranscript(guild, channel, ticketRow, status, actor, messages);
   const fileName = `transcript-${ticketRow.panel}-${channel.id}.html`;
@@ -794,7 +843,7 @@ async function generateAndPostTranscript(guild, channel, ticketRow, status, acto
     .setColor(0x5865f2)
     .setTitle("TheySix | Minecraft")
     .setThumbnail(guild.iconURL({ size: 64 }) || undefined)
-    .setDescription(`Ticket has been ${status}`)
+    .setDescription(`Modmail has been ${status}`)
     .addFields(
       { name: "\u{1F464} Ticket Owner", value: ownerTag, inline: true },
       { name: "\u{1F3AB} Ticket ID", value: `closed-${channel.name}`, inline: true },
@@ -802,7 +851,7 @@ async function generateAndPostTranscript(guild, channel, ticketRow, status, acto
       { name: "\u{1F534} Closing reason", value: closingReason, inline: true },
       { name: "\u{1F4DC} Web Transcript", value: "[Click here](https://discord.com/channels/" + guild.id + "/" + channel.id + ") to view the full transcript", inline: false },
     )
-    .setFooter({ text: `Claimed by ${claimedBy} \u2022 Mihulish Ticket System` })
+    .setFooter({ text: `Claimed by ${claimedBy} \u2022 Mihulish Modmail` })
     .setTimestamp();
 
   await ch
@@ -981,8 +1030,7 @@ async function runPanelCommand(interaction) {
 // `/close` — close the current ticket via command (staff only).
 async function runCloseCommand(interaction) {
   if (
-    !store.isStaff(interaction.guildId, interaction.user.id) &&
-    !interaction.memberPermissions.has(PermissionFlagsBits.ManageChannels)
+    !canManageTicket(interaction)
   ) {
     return { content: "Only staff can close tickets.", ephemeral: true };
   }
@@ -1142,6 +1190,11 @@ async function processExpiredCloseRequests(client) {
 }
 
 module.exports = {
+  openTicket,
+  closeTicket,
+  reopenTicket,
+  deleteTicket,
+  claimTicket,
   handleTicketInteraction,
   runPanelCommand,
   runCloseCommand,

@@ -1,0 +1,12 @@
+{
+  "date": "2026-11-08",
+  "version": "v1.16.0",
+  "changes": [
+    "Reworked support as private modmail channels. `/ticket create` now offers Java, Bedrock, Report User, Report Bug, Partnership, Management, and Staff Apply.",
+    "Added `/ticket close`, `delete`, `reopen`, `claim`, `transfer`, and `availability`. Managers can turn new requests on or off for each type; all types are on by default.",
+    "Fixed `/ticket ping`: use `state:on|off` in a modmail channel or `hours:<number>` to check idle conversations.",
+    "Updated `/rules` with a dropdown that shows one rule at a time and links to current Discord, Minecraft, and TheySix resources.",
+    "Fixed `/wiki article` search for the current TheySix Wiki domain and added the wiki homepage as an index fallback.",
+    "Closing modmail now saves full local transcripts and a combined JSONL corpus. Java, Bedrock, and bug reports can produce reviewed local wiki drafts with `/learn review`."
+  ]
+}

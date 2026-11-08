@@ -181,6 +181,11 @@ try {
   if (!error.message.includes("duplicate column name")) throw error;
 }
 try {
+  db.exec("ALTER TABLE guild_settings ADD COLUMN ticket_learning_enabled INTEGER NOT NULL DEFAULT 1");
+} catch (error) {
+  if (!error.message.includes("duplicate column name")) throw error;
+}
+try {
   db.exec("CREATE INDEX IF NOT EXISTS farms_type ON farms(guild_id, type, created_at)");
 } catch {}
 try {
@@ -197,11 +202,11 @@ db.exec("DROP TABLE IF EXISTS votes");
 db.exec("DROP TABLE IF EXISTS qotd_state");
 db.exec("DROP TABLE IF EXISTS qotd_threads");
 
-const DEFAULT_TICKET_PANELS = ["java", "br", "bug", "report", "partnership", "management"];
+const DEFAULT_TICKET_PANELS = ["java", "br", "report", "bug", "partnership", "management", "staff-apply"];
 
 // Desired display order for panels: java, bedrock, report bug, report a
 // person, partnership, management. Anything unknown sorts last.
-const PANEL_ORDER = ["java", "br", "bug", "report", "partnership", "management"];
+const PANEL_ORDER = DEFAULT_TICKET_PANELS;
 function panelOrderIndex(panel) {
   const i = PANEL_ORDER.indexOf(panel);
   return i === -1 ? PANEL_ORDER.length : i;
@@ -284,6 +289,11 @@ function listTicketPanels(guildId) {
     .all(guildId)
     .sort((a, b) => panelOrderIndex(a.panel) - panelOrderIndex(b.panel));
 }
+function setTicketPanelAvailability(guildId, panel, enabled) {
+  ensureGuild(guildId);
+  return db.prepare("UPDATE ticket_panels SET enabled=? WHERE guild_id=? AND panel=?")
+    .run(enabled ? 1 : 0, guildId, panel).changes > 0;
+}
 function settings(guildId) {
   if (!isAllowedGuild(guildId)) return {};
   ensureGuild(guildId);
@@ -301,6 +311,7 @@ function updateSettings(guildId, values) {
     "helper_role_id",
     "log_channel_id",
     "ticket_transcript_channel_id",
+    "ticket_learning_enabled",
     "prefix",
     "appeal_link",
     "dn_link_style",
@@ -313,7 +324,7 @@ function updateSettings(guildId, values) {
   for (const key of allowedKeys) {
     if (Object.prototype.hasOwnProperty.call(values, key)) {
       db.prepare(`UPDATE guild_settings SET ${key} = ? WHERE guild_id = ?`).run(
-        values[key] || null,
+        key === "ticket_learning_enabled" ? Number(Boolean(values[key])) : values[key] || null,
         guildId,
       );
     }
@@ -479,8 +490,8 @@ function saveTicket(g, c, p, user, status) {
   if (!isAllowedGuild(g)) return null;
   ensureGuild(g);
   db.prepare(
-    "INSERT INTO tickets(guild_id,channel_id,panel,ticket_user_id,status,created_at) VALUES(?,?,?,?,?,?) ON CONFLICT(guild_id,channel_id) DO UPDATE SET panel=excluded.panel,ticket_user_id=COALESCE(excluded.ticket_user_id,tickets.ticket_user_id),status=excluded.status,closed_at=CASE WHEN excluded.status='CLOSED' THEN COALESCE(tickets.closed_at,excluded.closed_at) ELSE NULL END",
-  ).run(g, c, p, user || null, status, Date.now());
+    "INSERT INTO tickets(guild_id,channel_id,panel,ticket_user_id,status,created_at,closed_at) VALUES(?,?,?,?,?,?,CASE WHEN ?='CLOSED' THEN ? ELSE NULL END) ON CONFLICT(guild_id,channel_id) DO UPDATE SET panel=excluded.panel,ticket_user_id=COALESCE(excluded.ticket_user_id,tickets.ticket_user_id),status=excluded.status,closed_at=CASE WHEN excluded.status='CLOSED' THEN COALESCE(tickets.closed_at,excluded.closed_at) ELSE NULL END",
+  ).run(g, c, p, user || null, status, Date.now(), status, Date.now());
   return ticket(g, c);
 }
 function assignTicket(g, c, u) {
@@ -1091,19 +1102,19 @@ const SOLUTION_INDICATORS = [
 
 // Simple heuristic: extract potential Q&A from ticket transcript
 function extractTicketKnowledge(messages, panel, guildId) {
-  // Only keep messages from the last 48 hours of the conversation to focus on the resolution
-  const cutoff = Date.now() - 48 * 60 * 60 * 1000;
-  const relevant = messages.filter((m) => m.createdTimestamp > cutoff);
+  // The full conversation may span days or weeks. Ignore bot notices, then
+  // retain the user's context and the most useful staff guidance.
+  const relevant = messages.filter((m) => !m.author?.bot);
   if (relevant.length < 3) return []; // Not enough conversation
 
   // Find the user's questions (first few messages) and staff answers (later messages)
-  const userMessages = relevant.filter((m) => !m.author?.bot && !store.isStaff(guildId, m.author?.id) && m.author?.id !== "985227944236568606");
-  const staffMessages = relevant.filter((m) => m.author?.bot === false && (store.isStaff(guildId, m.author?.id) || m.author?.id === "985227944236568606"));
+  const userMessages = relevant.filter((m) => !isStaff(guildId, m.author?.id));
+  const staffMessages = relevant.filter((m) => isStaff(guildId, m.author?.id));
 
   if (userMessages.length === 0 || staffMessages.length === 0) return [];
 
   // The question is typically the first user message
-  const question = userMessages[0]?.content?.slice(0, 500) || "";
+  const question = userMessages.slice(0, 3).map((m) => m.content).filter(Boolean).join("\n\n").slice(0, 1500);
   if (!question.trim()) return [];
 
   // The answer is the most relevant staff message (longest one with solution indicators)
@@ -1120,7 +1131,7 @@ function extractTicketKnowledge(messages, panel, guildId) {
     if (content.includes("```") || content.includes("http")) score += 2;
     if (score > bestScore) {
       bestScore = score;
-      bestAnswer = content.slice(0, 1000);
+      bestAnswer = content.slice(0, 3000);
     }
   }
 
@@ -1374,6 +1385,7 @@ module.exports = {
   setEmbedWebhook,
   deleteEmbedWebhook,
   listTicketPanels,
+  setTicketPanelAvailability,
   addReminder,
   dueReminders,
   deleteReminder,

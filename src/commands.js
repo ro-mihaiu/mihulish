@@ -14,7 +14,7 @@ const fs = require("fs");
 const path = require("path");
 const { AttachmentBuilder } = require("discord.js");
 const store = require("./database");
-const { runPanelCommand, runCloseCommand, PANEL_QUESTIONS, AUTO_ASSIGN_RULES } = require("./tickets");
+const { runPanelCommand, runCloseCommand, openTicket, reopenTicket, deleteTicket, claimTicket, PANEL_QUESTIONS, AUTO_ASSIGN_RULES } = require("./tickets");
 const { makeEmbed, logCommand, logEvent, logModeration, sendDM, fetchVideoTitle, resolveThumbnail, searchWikis } = require("./utils");
 const COLOR = 0xe91e63;
 const DOCS = "https://mihulish.ro-mihaiu.xyz";
@@ -1387,26 +1387,44 @@ async function pingStaleTickets(guild, hours, { limit = 25, markActive = true } 
 
 const ticketCmd = new SlashCommandBuilder()
   .setName("ticket")
-  .setDescription("Ticket utilities")
+  .setDescription("Open and manage private modmail conversations")
+  .addSubcommand((s) => s.setName("create").setDescription("Open a private modmail conversation")
+    .addStringOption((o) => o.setName("type").setDescription("Support topic").setRequired(true).addChoices(
+      { name: "Java", value: "java" }, { name: "Bedrock", value: "br" },
+      { name: "Report User", value: "report" }, { name: "Report Bug", value: "bug" },
+      { name: "Partnership", value: "partnership" }, { name: "Management", value: "management" },
+      { name: "Staff Apply", value: "staff-apply" },
+    )))
+  .addSubcommand((s) => s.setName("close").setDescription("Close this modmail and save a transcript")
+    .addStringOption((o) => o.setName("reason").setDescription("Closure reason")))
+  .addSubcommand((s) => s.setName("delete").setDescription("Delete a closed modmail channel"))
+  .addSubcommand((s) => s.setName("reopen").setDescription("Reopen this modmail"))
+  .addSubcommand((s) => s.setName("claim").setDescription("Claim this modmail"))
+  .addSubcommand((s) => s.setName("transfer").setDescription("Transfer this modmail to another staff member")
+    .addUserOption((o) => o.setName("user").setDescription("Receiving staff member").setRequired(true)))
+  .addSubcommand((s) => s.setName("availability").setDescription("Allow or stop new modmail of a type")
+    .addStringOption((o) => o.setName("type").setDescription("Support topic").setRequired(true).addChoices(
+      { name: "Java", value: "java" }, { name: "Bedrock", value: "br" },
+      { name: "Report User", value: "report" }, { name: "Report Bug", value: "bug" },
+      { name: "Partnership", value: "partnership" }, { name: "Management", value: "management" },
+      { name: "Staff Apply", value: "staff-apply" },
+    ))
+    .addStringOption((o) => o.setName("state").setDescription("Whether users can open this type").setRequired(true)
+      .addChoices({ name: "On", value: "on" }, { name: "Off", value: "off" })))
   .addSubcommand((s) =>
     s
       .setName("ping")
-      .setDescription("Ping tickets with no staff reply for this many hours, or toggle pings in the current ticket")
+      .setDescription("Toggle pings here or check stale modmail")
       .addStringOption((o) =>
         o
-          .setName("hours")
-          .setDescription("Ping tickets with no staff reply for this many hours, or toggle pings in the current ticket")
-          .setRequired(true)
+          .setName("state")
+          .setDescription("Enable or disable pings in this modmail")
           .addChoices(
-            { name: "on — re-enable ticket pings", value: "on" },
-            { name: "off — stop pinging this ticket", value: "off" },
-            { name: "12h", value: "12" },
-            { name: "24h", value: "24" },
-            { name: "48h", value: "48" },
-            { name: "72h", value: "72" },
-            { name: "1 week", value: "168" },
+            { name: "On", value: "on" },
+            { name: "Off", value: "off" },
           ),
-      ),
+      )
+      .addIntegerOption((o) => o.setName("hours").setDescription("Ping conversations idle this many hours (1–720)").setMinValue(1).setMaxValue(720)),
   )
   .addSubcommand((s) =>
     s
@@ -1426,9 +1444,32 @@ const ticketCmd = new SlashCommandBuilder()
           ),
       ),
   );
-add(ticketCmd, "Tickets", "Staff", async (i) => {
-  if (!staff(i)) return deny(i);
+add(ticketCmd, "Tickets", "Everyone", async (i) => {
   const sub = i.options.getSubcommand();
+  if (sub === "create") return openTicket(i, i.options.getString("type", true));
+  if (sub === "availability") {
+    if (!manager(i)) return deny(i, "Only managers can change modmail availability.");
+    const type = i.options.getString("type", true);
+    const enabled = i.options.getString("state", true) === "on";
+    if (!store.setTicketPanelAvailability(i.guildId, type, enabled)) return deny(i, "Unknown modmail type.");
+    return respond(i, { content: `**${type}** modmail is now **${enabled ? "on" : "off"}** for new conversations.`, ephemeral: true });
+  }
+  if (!staff(i) && !manager(i)) return deny(i);
+  if (sub === "close") return respond(i, await runCloseCommand(i));
+  if (sub === "delete") return deleteTicket(i);
+  if (sub === "reopen") return reopenTicket(i);
+  if (sub === "claim") return claimTicket(i);
+  if (sub === "transfer") {
+    const t = store.ticket(i.guildId, i.channelId);
+    const u = i.options.getUser("user", true);
+    if (!t || t.status !== "OPEN" || !t.ticket_user_id) return deny(i, "Run this in an open modmail channel.");
+    if (!store.isStaff(i.guildId, u.id)) return deny(i, "The recipient must be registered staff.");
+    if (u.id === t.assigned_staff_id) return deny(i, "That member already owns this modmail.");
+    const previous = t.assigned_staff_id;
+    store.assignTicket(i.guildId, i.channelId, u.id);
+    sendDM(u.id, i.client, "Modmail transferred", `You received **${t.panel}** modmail: <#${i.channelId}>`).catch(() => {});
+    return respond(i, { content: `<@${t.ticket_user_id}> <@${u.id}> has received this modmail from <@${i.user.id}>.${previous ? ` Previously claimed by <@${previous}>.` : ""}`, allowedMentions: { users: [t.ticket_user_id, u.id, i.user.id, previous].filter(Boolean) } });
+  }
   if (sub === "staff-helper") {
     const t = store.ticket(i.guildId, i.channelId);
     if (!t || t.status !== "OPEN" || !t.ticket_user_id)
@@ -1516,7 +1557,7 @@ add(ticketCmd, "Tickets", "Staff", async (i) => {
   }
 
   // ping subcommand — keep the existing behaviour.
-  const raw = i.options.getString("ping", true);
+  const raw = i.options.getString("state");
 
   // `/ticket ping:<on/off>` toggles pings for the current ticket. Default is
   // on; when off, neither the sweep nor `/ticket ping` pings anyone here.
@@ -1537,10 +1578,10 @@ add(ticketCmd, "Tickets", "Staff", async (i) => {
     });
   }
 
-  const hours = Number.parseInt(raw, 10);
+  const hours = i.options.getInteger("hours");
   if (!hours || hours < 1 || hours > 720)
     return respond(i, {
-      content: "Use `/ticket ping:<on|off>` to toggle pings in this ticket, or a 1–720 hour value to ping stale tickets.",
+      content: "Use `/ticket ping state:on|off` here, or `/ticket ping hours:<1–720>` to check stale conversations.",
       ephemeral: true,
     });
   const { stale, sent, skipped } = await pingStaleTickets(i.guild, hours);
@@ -2125,85 +2166,7 @@ add(settingsCmd, "Utility", "Administrator", async (i) => {
 });
 
 // ---------------- /rules ----------------
-// Posts the TheySix Discord rules as a Components V2 message (two containers:
-// the rules themselves plus a disclaimer/punishments container), matching the
-// styled changelog-style messages used in the server.
-const RULES_LAST_UPDATED = "26th October 2026";
-function rulesComponentPayload() {
-  const text = (content) => ({ type: 10, content });
-  const divider = (spacing = 1) => ({ type: 14, divider: true, spacing });
-  const linkButton = (label, url) => ({ type: 2, style: 5, label, url });
-  const buttonRow = (...buttons) => ({ type: 1, components: buttons });
-  const container = (...components) => ({ type: 17, accent_color: 0x4cc4c0, components });
-  return {
-    flags: MessageFlags.IsComponentsV2,
-    components: [
-      container(
-        text(
-          "# [**TheySix Discord Rules**](https://wiki-theysix.ro-mihaiu.xyz/w/discord/theysix-discord-rules)\n" +
-            "Rules for keeping the TheySix Discord welcoming, organized, and safe. " +
-            "These rules apply to all members, messages, profiles, links, and channels.",
-        ),
-        divider(),
-        text(
-          "1. Respect Discord's Terms of Service, Community Guidelines, Minecraft's official policies, and applicable laws.",
-        ),
-        buttonRow(
-          linkButton("Discord's Terms of Service", "https://discord.com/terms"),
-          linkButton("Discord's Community Guidelines", "https://discord.com/guidelines"),
-          linkButton("Minecraft EULA", "https://www.minecraft.net/eula"),
-          linkButton("Minecraft's Usage Guidelines", "https://www.minecraft.net/usage-guidelines"),
-        ),
-        divider(),
-        buttonRow(
-          linkButton("Terms of Service", "https://wiki-theysix.ro-mihaiu.xyz/legal/terms"),
-          linkButton("Privacy Policy", "https://wiki-theysix.ro-mihaiu.xyz/legal/privacy"),
-          linkButton("Cookie Notice", "https://wiki-theysix.ro-mihaiu.xyz/legal/cookies"),
-        ),
-        text(
-          "2. Treat all members with respect.\n" +
-            "> **Includes but not limited to:** harassment, bullying, hate, slander, personal attacks, intimidation, and hostile behavior.\n\n" +
-            "3. Keep the server family-friendly.\n" +
-            "> **Applies to:** messages, images, links, profiles, and other content shared in the server.\n" +
-            "> **Includes:** NSFW or adult content.\n\n" +
-            "4. Use channels for their intended purpose and follow their descriptions and pinned messages.\n\n" +
-            "5. Minecraft creators may share their builds and YouTube videos in <#1390278045121904670>.\n" +
-            "> **Important:** Online shops, paid services, and paid promotions are not allowed, including in the self-promotion channel.\n\n" +
-            "6. Do not advertise commercial content to TheySix members.\n" +
-            "> **Includes:** online shops, paid services, paid promotions, and asking members to DM you to buy, sell, or hire.\n\n" +
-            "7. Use support channels before pinging staff.\n" +
-            "> You may ping a maximum of **2 Helpers once**. Try to choose Helpers without the **LOA** or **SLOA** tag.\n" +
-            "> If Helpers do not reply after several hours, you may ping a **Moderator once**.\n" +
-            "> Mass-pinging staff is not allowed.\n\n" +
-            "8. Use **<@&1563185329714765854>** only for genuinely urgent issues.\n" +
-            "> **Expected response:** usually between **1 and 8 hours**.\n" +
-            "> **Misuse:** may result in a warning. The **third warning may result in a ban**.\n\n" +
-            "9. Do not ping protected roles or staff without a valid reason.\n" +
-            "> Follow any additional instructions given by staff about role mentions.\n\n" +
-            "10. Do not create duplicate support requests.\n" +
-            "> Update your existing post or ticket instead of making another one.",
-        ),
-      ),
-      container(
-        text(
-          "**Disclaimer:** Not all behavior can be explicitly listed. Actions that harm the community, disrupt support, or exploit loopholes may still result in moderation. " +
-            "Decisions are made at staff discretion, considering context, severity, and history.",
-        ),
-        divider(),
-        text(
-          "### Punishments Applied\n" +
-            "> Server punishments vary depending on the infraction, the situation, and the user's history. Staff may use discretion and may also act on situations not explicitly listed in these rules. " +
-            "If you believe you have been treated unfairly by a staff member, contact a manager through <#1444669624435212308>.",
-        ),
-        divider(),
-        text(
-          "-# These rules may change from time to time. Check them regularly to stay up to date.\n" +
-            `-# Last updated : ${RULES_LAST_UPDATED}`,
-        ),
-      ),
-    ],
-  };
-}
+// The interactive rules overview and individual embeds live in rules.js.
 const rulesCmd = new SlashCommandBuilder()
   .setName("rules")
   .setDescription("Post the TheySix Discord rules as a styled message");
@@ -2213,7 +2176,7 @@ add(rulesCmd, "Utility", "Manage Messages", async (i) => {
     !isBotOwner(i.user.id, i.client)
   )
     return deny(i, "You need Manage Messages to post the rules.");
-  return respond(i, rulesComponentPayload());
+  return respond(i, require("./rules").overview());
 });
 
 const channelsCmd = new SlashCommandBuilder()
@@ -2993,7 +2956,7 @@ const learnCmd = new SlashCommandBuilder()
       .addStringOption((o) =>
         o
           .setName("action")
-          .setDescription("Approve (creates wiki) or reject")
+          .setDescription("Approve (saves a local wiki draft) or reject")
           .setRequired(true)
           .addChoices(
             { name: "Approve", value: "approve" },

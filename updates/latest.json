@@ -1,8 +1,12 @@
 {
-  "date": "2026-10-31",
-  "version": "v1.15.9",
+  "date": "2026-11-08",
+  "version": "v1.16.0",
   "changes": [
-    "Farm links now use the new format: `https://theysix.tech/dn/<dn>`. This applies everywhere links are shown — `/dn` embeds (here, DMs, DN channel), `m.dn`, and the DM-failure fallback text.",
-    "Added a recurring renewal reminder: every 3 days the bot pings Mihaiu in each server's log channel so the bot renewal is not forgotten."
+    "Reworked support as private modmail channels. `/ticket create` now offers Java, Bedrock, Report User, Report Bug, Partnership, Management, and Staff Apply.",
+    "Added `/ticket close`, `delete`, `reopen`, `claim`, `transfer`, and `availability`. Managers can turn new requests on or off for each type; all types are on by default.",
+    "Fixed `/ticket ping`: use `state:on|off` in a modmail channel or `hours:<number>` to check idle conversations.",
+    "Updated `/rules` with a dropdown that shows one rule at a time and links to current Discord, Minecraft, and TheySix resources.",
+    "Fixed `/wiki article` search for the current TheySix Wiki domain and added the wiki homepage as an index fallback.",
+    "Closing modmail now saves full local transcripts and a combined JSONL corpus. Java, Bedrock, and bug reports can produce reviewed local wiki drafts with `/learn review`."
   ]
 }

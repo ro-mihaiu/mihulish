@@ -1,6 +1,8 @@
 // Ticket Learning Module — extracts useful Q&A from closed tickets
 // and creates wiki entries for helpers to reference later.
 const { EmbedBuilder } = require("discord.js");
+const fs = require("node:fs");
+const path = require("node:path");
 const store = require("./database");
 const { extractTicketKnowledge, addTicketLearning, listTicketLearning, getTicketLearning, updateTicketLearningStatus, setTicketLearningWikiArticle, deleteTicketLearning, isStaff, SOLUTION_INDICATORS } = require("./database");
 
@@ -39,9 +41,9 @@ function unescapeHtml(s) {
 }
 
 // Minimum time a ticket must be open before we consider it for learning (15 min)
-const MIN_TICKET_DURATION_MS = 15 * 60 * 1000;
+const MIN_TICKET_DURATION_MS = 0;
 // Only learn from tickets that were actually resolved (not just abandoned)
-const MIN_MESSAGES_FOR_LEARNING = 5;
+const MIN_MESSAGES_FOR_LEARNING = 3;
 
 /**
  * Called when a ticket is closed. Analyzes the conversation and extracts
@@ -55,7 +57,7 @@ async function learnFromClosedTicket(guild, channel, ticketRow) {
   let messages = [];
   try {
     let lastId;
-    for (let round = 0; round < 20; round++) {
+    for (let round = 0; round < 100; round++) {
       const batch = await channel.messages.fetch({
         limit: 100,
         before: lastId,
@@ -78,6 +80,7 @@ async function learnFromClosedTicket(guild, channel, ticketRow) {
 
   let learned = 0;
   for (const k of knowledge) {
+    if (store.db.prepare("SELECT 1 FROM ticket_learning WHERE guild_id=? AND channel_id=? AND question=?").get(guild.id, channel.id, k.question)) continue;
     const id = addTicketLearning(guild.id, ticketRow.id, channel.id, ticketRow.panel, k.question, k.answer, k.keywords);
     if (id) learned++;
   }
@@ -99,17 +102,19 @@ async function reviewTicketLearning(guild, interaction, learningId, action, cust
   }
 
   if (action === "approve") {
-    // Create wiki entry
     const articleName = customName || generateArticleName(entry);
     const platform = mapPanelToPlatform(entry.panel);
     const slug = slugify(articleName);
-    const wikiLink = `https://wiki-theysix.ro-mihaiu.xyz/w/${platform}/${slug}`;
     try {
-      const wiki = store.addWikiEntry(guild.id, articleName, wikiLink, interaction.user.id);
-      setTicketLearningWikiArticle(guild.id, learningId, wiki.article_name);
-      return { success: true, message: `Created wiki article **${wiki.article_name}**`, wiki };
+      const dir = path.resolve(process.env.MODMAIL_DRAFT_DIR || "./data/wiki-drafts");
+      fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+      const file = path.join(dir, `${entry.id}-${platform}-${slug || "draft"}.md`);
+      const body = `# ${articleName}\n\n> Draft from reviewed ${entry.panel} modmail #${entry.ticket_id}. Verify all details before publishing.\n\n## Question\n\n${entry.question}\n\n## Suggested answer\n\n${entry.answer}\n\n## Keywords\n\n${JSON.parse(entry.keywords || "[]").join(", ")}\n`;
+      fs.writeFileSync(file, body, { mode: 0o600 });
+      updateTicketLearningStatus(guild.id, learningId, "approved", interaction.user.id);
+      return { success: true, message: `Approved **${articleName}**. Local wiki draft: ${file}` };
     } catch (e) {
-      return { error: `Could not create wiki: ${e.message}` };
+      return { error: `Could not save wiki draft: ${e.message}` };
     }
   }
 
@@ -153,7 +158,7 @@ function buildLearningReviewEmbed(guildId) {
  */
 function isLearningEnabled(guildId) {
   const s = store.settings(guildId);
-  return s?.ticket_learning_enabled !== false; // default on
+  return s?.ticket_learning_enabled !== 0; // default on
 }
 
 function setLearningEnabled(guildId, enabled) {
@@ -190,10 +195,10 @@ function parseBotTranscriptHtml(html) {
     if (content === "<em>(no content)</em>") content = "";
     if (content.startsWith("<em>[embed]")) continue;
 
-    messages.push({ author, content });
+    messages.push({ author, content, bot: /^ bot\b/.test(part) });
   }
 
-  return { panel, owner, messages };
+  return { panel, owner: messages.find((m) => !m.bot)?.author || owner, messages };
 }
 
 function parseTicketToolTranscriptHtml(html) {
@@ -218,7 +223,7 @@ function parseTicketToolTranscriptHtml(html) {
   if (messages.length === 0) return null;
 
   let panel = "unknown";
-  const knownPanels = ["java", "bedrock", "bug", "report", "partnership", "br"];
+  const knownPanels = ["java", "bedrock", "bug", "report", "partnership", "management", "staff-apply", "br"];
 
   // Try to extract panel from <Server-Info> content
   const serverMatch = html.match(/<Server-Info[^>]*>([\s\S]*?)<\/Server-Info>/i);
@@ -285,8 +290,8 @@ function extractKnowledgeFromTranscript(transcript) {
   if (messages.length < 3) return [];
 
   const ownerAuthor = owner || messages[0].author;
-  const userMessages = messages.filter((m) => m.author === ownerAuthor);
-  const staffMessages = messages.filter((m) => m.author !== ownerAuthor);
+  const userMessages = messages.filter((m) => !m.bot && m.author === ownerAuthor);
+  const staffMessages = messages.filter((m) => !m.bot && m.author !== ownerAuthor);
 
   if (userMessages.length === 0 || staffMessages.length === 0) return [];
 
@@ -318,6 +323,8 @@ function extractKnowledgeFromTranscript(transcript) {
 }
 
 function saveTranscriptLearning(guild, channelId, panel, question, answer, keywords) {
+  if (!["java", "br", "bedrock", "bug"].includes(panel)) return null;
+  if (store.db.prepare("SELECT 1 FROM ticket_learning WHERE guild_id=? AND channel_id=? AND question=?").get(guild.id, channelId, question)) return null;
   try {
     return store.addTicketLearning(guild.id, 0, channelId, panel, question, answer, keywords);
   } catch (e) {
@@ -370,7 +377,7 @@ async function learnFromTranscriptChannel(guild, channel, limit = 50) {
           results.processed++;
           const knowledge = extractKnowledgeFromTranscript(transcript);
           for (const k of knowledge) {
-            const id = saveTranscriptLearning(guild, msg.channel.id, k.panel, k.question, k.answer, k.keywords);
+            const id = saveTranscriptLearning(guild, msg.id, k.panel, k.question, k.answer, k.keywords);
             if (id) results.learned++;
           }
         } catch (e) {

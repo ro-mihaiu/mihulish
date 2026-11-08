@@ -29,6 +29,7 @@ const {
   deliverDueReminders,
 } = require("./commands");
 const { handleTicketInteraction, handleCloseRequestButton, processExpiredCloseRequests } = require("./tickets");
+const { handleRulesSelect } = require("./rules");
 const { handlePrefixMessage } = require("./prefix");
 const { logCommand, logEvent, sendDM } = require("./commands");
 const logger = require("./logger");
@@ -128,7 +129,7 @@ function ticketInfo(channel) {
   const raw = closed ? name.slice(7) : name;
   const panel = store.db
     .prepare(
-      "SELECT panel FROM ticket_panels WHERE guild_id=? AND enabled=1 AND ? LIKE panel||'-%' ORDER BY length(panel) DESC LIMIT 1",
+      "SELECT panel FROM ticket_panels WHERE guild_id=? AND ? LIKE panel||'-%' ORDER BY length(panel) DESC LIMIT 1",
     )
     .get(channel.guild.id, raw)?.panel;
   if (!panel) return null;
@@ -256,7 +257,7 @@ client.on(Events.MessageCreate, async (message) => {
   const name = message.channel.name.toLowerCase();
   const panel = store.db
     .prepare(
-      "SELECT panel FROM ticket_panels WHERE guild_id=? AND enabled=1 AND ? LIKE panel||'-%' ORDER BY length(panel) DESC LIMIT 1",
+      "SELECT panel FROM ticket_panels WHERE guild_id=? AND ? LIKE panel||'-%' ORDER BY length(panel) DESC LIMIT 1",
     )
     .get(message.guild.id, name)?.panel;
   if (!panel) return;
@@ -330,6 +331,7 @@ function buttonNotice(i, content, useEphemeral = true) {
 // than the interaction, and the link itself is a followUp because `update()` has
 // already acknowledged the interaction by the time we answer.
 client.on(Events.InteractionCreate, async (i) => {
+  if (await handleRulesSelect(i)) return;
   if (!i.isButton() && !i.isModalSubmit() && !i.isStringSelectMenu()) return;
   if (
     await handleTicketInteraction(i).catch((e) => {
@@ -384,11 +386,13 @@ client.on(Events.InteractionCreate, async (i) => {
   if (!i.isChatInputCommand() || !i.guildId) return;
   const command = commands.find((c) => c.data.name === i.commandName);
   if (!command) return;
-  try {
-    await i.deferReply();
-  } catch (e) {
-    console.error("[interaction] failed to acknowledge command:", e);
-    return;
+  if (!(i.commandName === "ticket" && i.options.getSubcommand(false) === "create")) {
+    try {
+      await i.deferReply();
+    } catch (e) {
+      console.error("[interaction] failed to acknowledge command:", e);
+      return;
+    }
   }
   logCommand(i.guildId, i.client, {
     command: `/${i.commandName}`,
