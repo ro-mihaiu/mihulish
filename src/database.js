@@ -110,6 +110,11 @@ try {
   if (!error.message.includes("duplicate column name")) throw error;
 }
 try {
+  db.exec("ALTER TABLE tickets ADD COLUMN dm_only INTEGER NOT NULL DEFAULT 0");
+} catch (error) {
+  if (!error.message.includes("duplicate column name")) throw error;
+}
+try {
   db.exec("ALTER TABLE sticky_messages ADD COLUMN format TEXT NOT NULL DEFAULT 'plain'");
 } catch (error) {
   if (!error.message.includes("duplicate column name")) throw error;

@@ -4,6 +4,7 @@ const path = require("node:path");
 const {
   Client,
   GatewayIntentBits,
+  Partials,
   REST,
   Routes,
   Events,
@@ -28,7 +29,7 @@ const {
   finishEndedPolls,
   deliverDueReminders,
 } = require("./commands");
-const { handleTicketInteraction, handleCloseRequestButton, processExpiredCloseRequests } = require("./tickets");
+const { handleTicketInteraction, handleModmailDm, handleCloseRequestButton, processExpiredCloseRequests } = require("./tickets");
 const { handleRulesSelect } = require("./rules");
 const { handlePrefixMessage } = require("./prefix");
 const { logCommand, logEvent, sendDM } = require("./commands");
@@ -51,8 +52,10 @@ const client = new Client({
     GatewayIntentBits.GuildMembers,
     GatewayIntentBits.GuildModeration,
     GatewayIntentBits.GuildMessages,
+    GatewayIntentBits.DirectMessages,
     GatewayIntentBits.MessageContent,
   ],
+  partials: [Partials.Channel],
 });
 const rest = new REST({ version: "10" }).setToken(
   process.env.DISCORD_TOKEN || "",
@@ -162,6 +165,9 @@ setInterval(() => {
   finishEndedPolls(client).catch((e) => console.error("[polls]", e.message));
 }, 30000);
 client.on(Events.MessageCreate, handlePrefixMessage);
+client.on(Events.MessageCreate, (message) => {
+  handleModmailDm(message).catch((e) => console.error("[modmail] DM:", e.message));
+});
 const { handleFarmMessage } = require("./farm-detect");
 client.on(Events.MessageCreate, (message) => {
   handleFarmMessage(message).catch((e) =>

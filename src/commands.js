@@ -1263,7 +1263,7 @@ add(claim, "Tickets", "Staff", async (i) => {
   sendDM(i.user.id, i.client, "Ticket Assigned", `You claimed ticket **${t.panel}** in **${i.guild.name}**: <#${i.channelId}>`).catch(() => {});
   return respond(i, {
     content: `<@${t.ticket_user_id}> <@${i.user.id}> has claimed this ticket.`,
-    allowedMentions: { users: [t.ticket_user_id, i.user.id] },
+    allowedMentions: { users: [...new Set([t.ticket_user_id, i.user.id].filter(Boolean))] },
   });
 });
 const transfer = new SlashCommandBuilder()
@@ -1477,7 +1477,7 @@ add(ticketCmd, "Tickets", "Everyone", async (i) => {
     const previous = t.assigned_staff_id;
     store.assignTicket(i.guildId, i.channelId, u.id);
     sendDM(u.id, i.client, "Modmail transferred", `You received **${t.panel}** modmail: <#${i.channelId}>`).catch(() => {});
-    return respond(i, { content: `<@${t.ticket_user_id}> <@${u.id}> has received this modmail from <@${i.user.id}>.${previous ? ` Previously claimed by <@${previous}>.` : ""}`, allowedMentions: { users: [t.ticket_user_id, u.id, i.user.id, previous].filter(Boolean) } });
+    return respond(i, { content: `<@${t.ticket_user_id}> <@${u.id}> has received this modmail from <@${i.user.id}>.${previous ? ` Previously claimed by <@${previous}>.` : ""}`, allowedMentions: { users: [...new Set([t.ticket_user_id, u.id, i.user.id, previous].filter(Boolean))] } });
   }
   if (sub === "staff-helper") {
     const t = store.ticket(i.guildId, i.channelId);

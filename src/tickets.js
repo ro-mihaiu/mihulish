@@ -37,6 +37,10 @@ const REPORT_MESSAGE_CUSTOM_ID = "ticket_report_message";
 // handler can reset the select menu after the form is filled in. A user can
 // only have one open modal at a time, so user_id is a sufficient key.
 const pendingPanelReset = new Map();
+const dmSessions = new Map();
+const dmActiveTickets = new Map();
+const DM_SELECT_ID = "modmail_dm_type";
+const DM_TICKET_SELECT_ID = "modmail_dm_channel";
 
 // ---------- helpers ----------
 
@@ -529,7 +533,7 @@ async function createTicket(interaction, panel, answers, evidence = null) {
   ];
   // Staff configured in the bot (or managers) can see every ticket.
   const restricted = ["report", "bug", "partnership", "management", "staff-apply"].includes(panel);
-  const staffOverwrites = (restricted ? [] : store.listStaff(guild.id))
+  const staffOverwrites = (restricted ? [] : store.listStaff(guild.id).filter((s) => s.user_id !== interaction.user.id))
     .map((s) => ({
       id: s.user_id,
       allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory],
@@ -569,7 +573,7 @@ async function createTicket(interaction, panel, answers, evidence = null) {
       name: channelName,
       type: ChannelType.GuildText,
       parent: categoryId,
-      permissionOverwrites: [...overwriteBase, ...staffOverwrites],
+      permissionOverwrites: [...new Map([...overwriteBase, ...staffOverwrites].map((overwrite) => [overwrite.id, overwrite])).values()],
       reason: `Ticket opened by ${interaction.user.tag} (${panel})`,
     });
   } catch (e) {
@@ -579,6 +583,10 @@ async function createTicket(interaction, panel, answers, evidence = null) {
   }
 
   store.saveTicket(guild.id, channel.id, panel, interaction.user.id, "OPEN");
+  if (interaction.dmOnly) {
+    store.db.prepare("UPDATE tickets SET dm_only=1 WHERE guild_id=? AND channel_id=?").run(guild.id, channel.id);
+    dmActiveTickets.set(interaction.user.id, channel.id);
+  }
   // Persist the answers so `/ticket staff helper` and the transcript can
   // match expertise tags later.
   store.saveTicketAnswers(
@@ -644,8 +652,87 @@ async function createTicket(interaction, panel, answers, evidence = null) {
   });
 
   return interaction.editReply({
-    content: `Your **${panelLabel(panel)}** modmail is open: <#${channel.id}>`,
+    content: `Your **${panelLabel(panel)}** modmail is open: https://discord.com/channels/${guild.id}/${channel.id}\nContinue the conversation in that private channel.`,
   });
+}
+
+function openDmTickets(guildId, userId) {
+  return store.db.prepare("SELECT * FROM tickets WHERE guild_id=? AND ticket_user_id=? AND status='OPEN' AND dm_only=1 ORDER BY created_at DESC").all(guildId, userId);
+}
+async function sendDmTypeMenu(message, guild) {
+  const panels = store.listTicketPanels(guild.id).filter((p) => p.enabled);
+  if (!panels.length) return message.reply("Modmail is currently unavailable.");
+  const menu = new StringSelectMenuBuilder().setCustomId(DM_SELECT_ID).setPlaceholder("Choose a support topic")
+    .addOptions(panels.map((p) => ({ label: panelLabel(p.panel), value: p.panel, description: PANEL_META[p.panel]?.description || "Contact staff" })));
+  await message.reply({ content: "Hi! Choose the type of modmail you want to open. I’ll ask a few questions before sending it to staff.", components: [new ActionRowBuilder().addComponents(menu)] });
+}
+async function handleDmTypeSelect(interaction) {
+  const guild = interaction.client.guilds.cache.get(process.env.DISCORD_GUILD_ID || "985227944236568606");
+  if (!guild || !await guild.members.fetch(interaction.user.id).catch(() => null))
+    return interaction.reply({ content: "You need to be in the TheySix server to open modmail." });
+  const panel = interaction.values[0];
+  if (!store.listTicketPanels(guild.id).some((p) => p.panel === panel && p.enabled))
+    return interaction.reply({ content: "That modmail type is unavailable. DM me again to choose another." });
+  const existing = store.db.prepare("SELECT channel_id FROM tickets WHERE guild_id=? AND ticket_user_id=? AND panel=? AND status='OPEN'").get(guild.id, interaction.user.id, panel);
+  if (existing)
+    return interaction.reply({ content: `You already have an open **${panelLabel(panel)}** conversation: https://discord.com/channels/${guild.id}/${existing.channel_id}` });
+  dmSessions.set(interaction.user.id, { guildId: guild.id, panel, answers: [], at: Date.now() });
+  return interaction.reply({ content: `**${panelLabel(panel)}** — please answer the following questions one message at a time. Type **cancel** to stop.\n\n**1/${PANEL_QUESTIONS[panel].length}** ${PANEL_QUESTIONS[panel][0]}` });
+}
+async function handleDmTicketSelect(interaction) {
+  const guild = interaction.client.guilds.cache.get(process.env.DISCORD_GUILD_ID || "985227944236568606");
+  const ticket = guild && openDmTickets(guild.id, interaction.user.id).find((t) => t.channel_id === interaction.values[0]);
+  if (!ticket) return interaction.reply({ content: "That conversation is no longer open. DM me again to choose one." });
+  dmActiveTickets.set(interaction.user.id, ticket.channel_id);
+  return interaction.reply({ content: `Selected **${panelLabel(ticket.panel)}**: https://discord.com/channels/${guild.id}/${ticket.channel_id}\nContinue in that private channel.` });
+}
+async function handleModmailDm(message) {
+  if (message.guild || message.author.bot) return false;
+  const guild = message.client.guilds.cache.get(process.env.DISCORD_GUILD_ID || "985227944236568606");
+  if (!guild || !await guild.members.fetch(message.author.id).catch(() => null)) {
+    await message.reply("Join the TheySix Discord server before opening modmail.").catch(() => {});
+    return true;
+  }
+  await message.react("📬").catch(() => {});
+  const content = message.content.trim();
+  const session = dmSessions.get(message.author.id);
+  if (content.toLowerCase() === "cancel") {
+    dmSessions.delete(message.author.id);
+    await message.reply("Modmail setup cancelled. DM me again when you want to start.");
+    return true;
+  }
+  if (session && Date.now() - session.at < 15 * 60 * 1000) {
+    if (!content) return message.reply("Please send a text answer to continue.");
+    session.answers.push(content.slice(0, 1000));
+    session.at = Date.now();
+    const questions = PANEL_QUESTIONS[session.panel];
+    if (session.answers.length < questions.length)
+      return message.reply(`**${session.answers.length + 1}/${questions.length}** ${questions[session.answers.length]}`);
+    dmSessions.delete(message.author.id);
+    await message.reply("Thanks. I’m opening your private conversation with staff now.");
+    const fake = { guild, guildId: guild.id, user: message.author, client: message.client, dmOnly: true,
+      deferred: true, replied: false, editReply: ({ content: reply }) => message.author.send(reply) };
+    await createTicket(fake, session.panel, session.answers);
+    return true;
+  }
+  dmSessions.delete(message.author.id);
+  const open = openDmTickets(guild.id, message.author.id);
+  const active = open.find((t) => t.channel_id === dmActiveTickets.get(message.author.id)) || (open.length === 1 ? open[0] : null);
+  if (active && content.toLowerCase() !== "new") {
+    const channel = await guild.channels.fetch(active.channel_id).catch(() => null);
+    if (channel) {
+      await message.reply(`Your **${panelLabel(active.panel)}** modmail is open. Continue here: https://discord.com/channels/${guild.id}/${channel.id}`);
+      return true;
+    }
+  }
+  if (open.length > 1 && content.toLowerCase() !== "new") {
+    const menu = new StringSelectMenuBuilder().setCustomId(DM_TICKET_SELECT_ID).setPlaceholder("Choose an open conversation")
+      .addOptions(open.slice(0, 25).map((t) => ({ label: panelLabel(t.panel), value: t.channel_id, description: `Opened ${new Date(t.created_at).toLocaleDateString()}` })));
+    await message.reply({ content: "You have multiple open conversations. Choose which one to continue, or type **new** to start another topic.", components: [new ActionRowBuilder().addComponents(menu)] });
+    return true;
+  }
+  await sendDmTypeMenu(message, guild);
+  return true;
 }
 
 // ---------- claim ----------
@@ -753,6 +840,12 @@ async function closeTicket(interaction, { viaCommand = false, reason = null } = 
         }`),
     ],
   });
+
+  if (t.dm_only && t.ticket_user_id) {
+    const owner = await interaction.client?.users.fetch(t.ticket_user_id).catch(() => null);
+    await owner?.send(`Your **${panelLabel(t.panel)}** modmail has been closed.${reason ? ` Reason: ${reason}` : ""} DM me again to open a new conversation.`).catch(() => {});
+    dmActiveTickets.delete(t.ticket_user_id);
+  }
 
   if (!viaCommand) await interaction.editReply({ content: "Modmail closed." });
   return { ok: true };
@@ -971,6 +1064,14 @@ function notice(interaction, text) {
 // Entry point wired to Events.InteractionCreate in index.js. Returns true when
 // the interaction belonged to the ticket system.
 async function handleTicketInteraction(interaction) {
+  if (interaction.isStringSelectMenu() && interaction.customId === DM_TICKET_SELECT_ID) {
+    await handleDmTicketSelect(interaction);
+    return true;
+  }
+  if (interaction.isStringSelectMenu() && interaction.customId === DM_SELECT_ID) {
+    await handleDmTypeSelect(interaction);
+    return true;
+  }
   if (!interaction.guildId) return false;
   if (interaction.isModalSubmit() && interaction.customId.startsWith(`${REPORT_MESSAGE_CUSTOM_ID}|`)) {
     await submitMessageReport(interaction);
@@ -1169,6 +1270,7 @@ async function handleCloseRequestButton(interaction) {
   if (approved && !row.limit_hours) {
     const fakeInteraction = {
       guild,
+      client: interaction.client,
       channelId: interaction.channelId,
       channel: interaction.channel,
       user: { id: row.requested_by, tag: "ticket owner" },
@@ -1211,6 +1313,7 @@ async function processExpiredCloseRequests(client) {
       // transcript actor); it skips deferReply/editReply entirely.
       const fakeInteraction = {
         guild,
+        client,
         channelId: row.channel_id,
         channel,
         user: { id: row.requested_by, tag: "ticket owner" },
@@ -1231,6 +1334,7 @@ async function processExpiredCloseRequests(client) {
 }
 
 module.exports = {
+  handleModmailDm,
   reportMessage,
   openTicket,
   closeTicket,
