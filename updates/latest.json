@@ -1,10 +1,11 @@
 {
   "date": "2026-11-08",
-  "version": "v1.16.2",
+  "version": "v1.16.3",
   "changes": [
-    "Added View All Rules to `/rules`, sending the complete rule list privately in grouped embeds. Individual rules remain available from the dropdown.",
-    "Open modmail now reacts with 📬 when a member sends a message. Bot messages do not trigger the reaction.",
-    "Added `/faq` with answers about farm downloads, troubleshooting, community access, support, active staff, and retired staff.",
-    "Added Report with Mihulish to the message right-click menu. It opens private Report User modmail with the selected message as evidence, or adds it to an existing open report."
+    "DM Mihulish to start modmail: choose a support type, answer its questions, then continue with staff in the private channel the bot creates for you.",
+    "Fixed duplicate mention IDs in `/ticket transfer`, a null-user error when closing modmail, and the unused dependency warning during installation.",
+    "Remade `/rules` with detailed rule embeds. View All Rules now opens a private five-page list with a page selector, so every rule can be read.",
+    "Moved TheySix Terms, Privacy, and Cookies from rules action buttons into the embed footers.",
+    "Added prefix access: `m.rules` posts the overview, `m.rule <number>` shows one rule, and `m.faq` shows the FAQ."
   ]
 }

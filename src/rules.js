@@ -2,6 +2,8 @@ const { EmbedBuilder, ActionRowBuilder, StringSelectMenuBuilder, ButtonBuilder, 
 
 const RULES_URL = "https://wiki.theysix.tech/w/discord/theysix-discord-rules";
 const WELCOME_URL = "https://wiki.theysix.tech/w/discord/welcome-to-theysix-discord";
+const LEGAL_FOOTER = "Terms: https://wiki.theysix.tech/legal/terms | Privacy: https://wiki.theysix.tech/legal/privacy | Cookies: https://wiki.theysix.tech/legal/cookies";
+const PAGE_SIZE = 3;
 const rules = [
   ["Respect & Behaviour", "Treat other members with kindness and consideration.\n\n• Harassment, intimidation, personal attacks, slander, hate speech, and discrimination are prohibited.\n• Keep disagreements civil; do not target members or stir up hostility.\n• Give constructive criticism without insults or abuse."],
   ["Profiles & Impersonation", "Keep usernames, avatars, and profiles appropriate for the community.\n\n• Do not impersonate staff or another member.\n• Do not use hateful, explicit, or deliberately disruptive profile content.\n• Do not use fake identities to deceive or scam members."],
@@ -22,7 +24,33 @@ function link(label, url) { return new ButtonBuilder().setLabel(label).setURL(ur
 function ruleEmbed(index) {
   const [title, body] = rules[index];
   return new EmbedBuilder().setColor(0x5865f2).setTitle(`Rule ${index + 1} — ${title}`)
-    .setDescription(body).setFooter({ text: "TheySix | Minecraft - https://discord.gg/theysix" }).setURL(RULES_URL);
+    .setDescription(body).setFooter({ text: LEGAL_FOOTER }).setURL(RULES_URL);
+}
+function moderationEmbed() {
+  return new EmbedBuilder().setColor(0x5865f2).setTitle("🛡️ Moderation & Enforcement")
+    .setDescription("Staff assess reports individually using the available evidence, context, severity, and history.\n\n• Minor or first-time issues may receive a warning or message removal.\n• Repeated or serious conduct may lead to restrictions, timeouts, or bans.\n• Severe misconduct may result in immediate action.\n• If you disagree with a decision, contact management respectfully through private modmail.")
+    .setFooter({ text: LEGAL_FOOTER });
+}
+function commitmentEmbed() {
+  return new EmbedBuilder().setColor(0x5865f2).setTitle("✨ Our Community Commitment")
+    .setDescription("Build freely. Share responsibly. Respect others.\n\nRead the [full TheySix rules](https://wiki.theysix.tech/w/discord/theysix-discord-rules) and [welcome guide](https://wiki.theysix.tech/w/discord/welcome-to-theysix-discord).\n\nhttps://discord.gg/theysix")
+    .setFooter({ text: LEGAL_FOOTER });
+}
+function allRulesPage(page) {
+  const total = rules.length + 2;
+  const pages = Math.ceil(total / PAGE_SIZE);
+  const index = Math.max(0, Math.min(page, pages - 1));
+  const entries = [...rules.map((_, i) => ruleEmbed(i)), moderationEmbed(), commitmentEmbed()];
+  const menu = new StringSelectMenuBuilder().setCustomId("theysix_rules_page")
+    .setPlaceholder(`Page ${index + 1} of ${pages} — choose a page`)
+    .addOptions(Array.from({ length: pages }, (_, i) => ({
+      label: `Page ${i + 1} — ${i * PAGE_SIZE + 1}–${Math.min((i + 1) * PAGE_SIZE, total)}`,
+      value: String(i), default: i === index,
+    })));
+  return {
+    embeds: entries.slice(index * PAGE_SIZE, (index + 1) * PAGE_SIZE),
+    components: [new ActionRowBuilder().addComponents(menu)],
+  };
 }
 function overview() {
   const menu = new StringSelectMenuBuilder().setCustomId("theysix_rules_select")
@@ -31,26 +59,25 @@ function overview() {
   return {
     embeds: [new EmbedBuilder().setColor(0x5865f2).setTitle("📜 TheySix | Community Rules & Guidelines")
       .setDescription("Welcome to the TheySix community!\n\nTheySix is a place to share Minecraft farms, learn from other builders, and help each other improve. To keep the community safe and useful, everyone is expected to follow these rules.\n\nSelect a guideline below, or press **View All Rules** to read every rule privately. By participating, you agree to these rules and any channel-specific instructions.\n\nThank you for helping make TheySix welcoming for everyone!\n\nhttps://discord.gg/theysix")
-      .addFields({ name: "Official policies", value: "[Terms](https://wiki.theysix.tech/legal/terms) · [Privacy](https://wiki.theysix.tech/legal/privacy) · [Cookies](https://wiki.theysix.tech/legal/cookies)" })],
+      .setFooter({ text: LEGAL_FOOTER })],
     components: [
       new ActionRowBuilder().addComponents(menu),
       new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId("theysix_rules_all").setLabel("View All Rules").setStyle(ButtonStyle.Primary), link("Full Rules", RULES_URL), link("Welcome Guide", WELCOME_URL), link("Support Guide", "https://wiki.theysix.tech/w/discord/using-theysix-support")),
       new ActionRowBuilder().addComponents(link("Discord Terms", "https://discord.com/terms"), link("Discord Guidelines", "https://discord.com/guidelines"), link("Minecraft EULA", "https://www.minecraft.net/eula"), link("Minecraft Guidelines", "https://www.minecraft.net/usage-guidelines")),
-      new ActionRowBuilder().addComponents(link("TheySix Terms", "https://wiki.theysix.tech/legal/terms"), link("Privacy", "https://wiki.theysix.tech/legal/privacy"), link("Cookies", "https://wiki.theysix.tech/legal/cookies"), link("Wiki", "https://wiki.theysix.tech/w"), link("Farm Archive", "https://www.theysix.tech/#farms")),
+      new ActionRowBuilder().addComponents(link("Wiki", "https://wiki.theysix.tech/w"), link("Farm Archive", "https://www.theysix.tech/#farms")),
       new ActionRowBuilder().addComponents(link("Events Server", "https://events.theysix.tech")),
     ],
   };
 }
 async function handleRulesSelect(interaction) {
   if (interaction.isButton() && interaction.customId === "theysix_rules_all") {
-    await interaction.reply({ embeds: rules.slice(0, 9).map((_, i) => ruleEmbed(i)), ephemeral: true });
-    await interaction.followUp({ embeds: [
-      ...rules.slice(9).map((_, i) => ruleEmbed(i + 9)),
-      new EmbedBuilder().setColor(0x5865f2).setTitle("🛡️ Moderation & Enforcement")
-        .setDescription("Staff assess reports individually using the available evidence, context, severity, and history.\n\n• Minor or first-time issues may receive a warning or message removal.\n• Repeated or serious conduct may lead to restrictions, timeouts, or bans.\n• Severe misconduct may result in immediate action.\n• If you disagree with a decision, contact management respectfully through private modmail."),
-      new EmbedBuilder().setColor(0x5865f2).setTitle("✨ Our Community Commitment")
-        .setDescription("Build freely. Share responsibly. Respect others.\n\nRead the [full TheySix rules](https://wiki.theysix.tech/w/discord/theysix-discord-rules) and [welcome guide](https://wiki.theysix.tech/w/discord/welcome-to-theysix-discord).\n\nhttps://discord.gg/theysix"),
-    ], ephemeral: true });
+    await interaction.reply({ ...allRulesPage(0), ephemeral: true });
+    return true;
+  }
+  if (interaction.isStringSelectMenu() && interaction.customId === "theysix_rules_page") {
+    const page = Number(interaction.values[0]);
+    if (!Number.isInteger(page) || page < 0 || page >= Math.ceil((rules.length + 2) / PAGE_SIZE)) return false;
+    await interaction.update(allRulesPage(page));
     return true;
   }
   if (!interaction.isStringSelectMenu() || interaction.customId !== "theysix_rules_select") return false;
@@ -59,4 +86,4 @@ async function handleRulesSelect(interaction) {
   await interaction.reply({ embeds: [ruleEmbed(index)], ephemeral: true });
   return true;
 }
-module.exports = { overview, handleRulesSelect, ruleEmbed, rules };
+module.exports = { overview, allRulesPage, handleRulesSelect, ruleEmbed, rules };
